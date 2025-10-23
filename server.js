@@ -4,9 +4,18 @@ const app = express();
 const http = require('http');
 const server = http.createServer(app);
 const { Server } = require("socket.io");
-const io = new Server(server);
 const path = require('path');
 const webpush = require('web-push'); 
+
+// ★★★ ここを修正 ★★★
+// Socket.IOサーバーを初期化する際に、CORS設定を追加します
+const io = new Server(server, {
+  cors: {
+    origin: "*", // すべてのドメインからの接続を許可（デバッグ用）
+    methods: ["GET", "POST"]
+  }
+});
+// ★★★ 修正ここまで ★★★
 
 let orders = [];
 let orderCounter = 1; 
@@ -152,13 +161,10 @@ io.on('connection', (socket) => {
           delete customerSockets[orderId];
         })
         .catch(err => {
-          // ★★★ エラーの原因だった箇所 ★★★
-          // バッククォート ` を正しく閉じます
           console.error(`注文 ${orderId} へのプッシュ通知失敗:`, err.statusCode);
           if (err.statusCode === 410 || err.statusCode === 404) { 
             delete subscriptions[orderId];
           }
-          // ★★★ 修正ここまで ★★★
         });
     }
   });
