@@ -6,14 +6,14 @@ const server = http.createServer(app);
 const { Server } = require("socket.io");
 const io = new Server(server);
 const path = require('path');
-const webpush = require('web-push'); // ★ 追加
+const webpush = require('web-push'); 
 
 let orders = [];
 let orderCounter = 1; 
 let subscriptions = {};
 let customerSockets = {};
 
-// ★ VAPIDキーの設定
+// VAPIDキーの設定
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 
@@ -33,14 +33,12 @@ app.use(express.json());
 // --- 静的ファイルの配信 ---
 app.use(express.static(path.join(__dirname))); 
 
-// ★★★ ここを修正（復活）★★★
 // トップページ ( / ) に order.html を割り当てる
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'order.html'));
 });
-// ★★★ 修正ここまで ★★★
 
-// ★ 各画面へのルーティング
+// 各画面へのルーティング
 app.get('/cashier', (req, res) => {
   res.sendFile(path.join(__dirname, 'cashier.html'));
 });
@@ -154,4 +152,33 @@ io.on('connection', (socket) => {
           delete customerSockets[orderId];
         })
         .catch(err => {
-          console.error(`注文 ${orderId} へのプッシュ通知
+          // ★★★ エラーの原因だった箇所 ★★★
+          // バッククォート ` を正しく閉じます
+          console.error(`注文 ${orderId} へのプッシュ通知失敗:`, err.statusCode);
+          if (err.statusCode === 410 || err.statusCode === 404) { 
+            delete subscriptions[orderId];
+          }
+          // ★★★ 修正ここまで ★★★
+        });
+    }
+  });
+  
+  // 接続が切れた時の処理
+  socket.on('disconnect', () => {
+    console.log('クライアントが切断しました:', socket.id);
+    for (const orderId in customerSockets) {
+      if (customerSockets[orderId] === socket.id) {
+        delete customerSockets[orderId];
+        console.log(`お客様登録解除 (Socket): 注文番号 ${orderId}`);
+        break;
+      }
+    }
+  });
+});
+
+
+// --- サーバー起動 ---
+const PORT = process.env.PORT || 3000; 
+server.listen(PORT, () => {
+  console.log(`サーバーが http://localhost:${PORT} で起動しました。`);
+});
