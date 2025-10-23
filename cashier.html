@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>レジ 管理画面</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        h1, h2 { color: #333; }
+        .order-list { list-style: none; padding: 0; }
+        .order-item { 
+            border: 2px solid #ffc107; /* 黄色 */
+            background: #fffaf0;
+            padding: 15px; 
+            margin-bottom: 15px; 
+            border-radius: 8px;
+        }
+        .order-total { font-weight: bold; margin-top: 10px; font-size: 1.1em; }
+        .btn-confirm { background-color: #28a745; color: white; padding: 10px; border: none; font-size: 1.1em; cursor: pointer; }
+        
+        /* ★ 売上集計用のスタイル ★ */
+        #sales-report-btn {
+            background-color: #17a2b8;
+            color: white;
+            padding: 10px;
+            font-size: 1.1em;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #sales-report {
+            font-size: 1.2em;
+            margin-top: 10px;
+            padding: 10px;
+            background: #f4f4f4;
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <h1>レジ（支払い待ち）</h1>
+    <ul id="pending-list" class="order-list">
+        </ul>
+    
+    <hr style="margin: 30px 0;">
+    <h2>売上集計</h2>
+    <button id="sales-report-btn">今日の売上を集計</button>
+    <div id="sales-report">
+        </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io(); // サーバーに接続
+
+        const pendingList = document.getElementById('pending-list');
+
+        // ★ 支払い待ちリストに注文を追加する関数
+        function addPendingOrderToView(order) {
+            if (document.getElementById(`order-pending-${order.id}`)) return;
+            const li = document.createElement('li');
+            li.className = 'order-item';
+            li.id = `order-pending-${order.id}`; 
+            
+            let itemsHtml = '<ul>';
+            let totalPrice = 0;
+            order.items.forEach(item => {
+                itemsHtml += `<li>${item.name} - ${item.price}円 x ${item.quantity}</li>`;
+                totalPrice += item.price * item.quantity;
+            });
+            itemsHtml += '</ul>';
+
+            li.innerHTML = `
+                <h3>注文番号: ${order.id} (支払い待ち)</h3>
+                ${itemsHtml}
+                <div class="order-total">合計: ${totalPrice}円</div> 
+                <button class="btn-confirm" onclick="confirmPayment(${order.id})">
+                    支払い完了（厨房へ送る）
+                </button>
+            `;
+            pendingList.prepend(li);
+        }
+
+        // --- Socket.IO イベント受信 ---
+
+        // 1. 接続時に、現在の「支払い待ち」注文のみ表示
+        socket.on('initial_orders', (orders) => {
+            pendingList.innerHTML = ''; 
+            orders.reverse().forEach(order => {
+                if (order.status === '支払い待ち') {
+                    addPendingOrderToView(order);
+                }
+            });
+        });
+
+        // 2. 「支払い待ち」注文をレジリストに追加
+        socket.on('new_pending_order', (newOrder) => {
+            console.log('支払い待ち受信:', newOrder);
+            addPendingOrderToView(newOrder);
+        });
+
+        // 3. 厨房への通知（new_kitchen_order）が来たら、このリストから削除
+        socket.on('new_kitchen_order', (kitchenOrder) => {
+            const pendingItem = document.getElementById(`order-pending-${kitchenOrder.id}`);
+            if (pendingItem) {
+                pendingItem.remove();
+            }
+        });
+
+        // --- ボタン操作 ---
+
+        // 「支払い完了」ボタンが押された時の処理
+        function confirmPayment(orderId) {
+            console.log(`注文 ${orderId} の支払い完了`);
+            socket.emit('confirm_payment', { id: orderId });
+        }
+        
+        // ★★★ ここからが追加された売上集計処理です ★★★
+        // 売上集計ボタンの処理
+        const reportBtn = document.getElementById('sales-report-btn');
+        const reportDiv = document.getElementById('sales-report');
+
+        reportBtn.addEventListener('click', async () => {
+            reportDiv.textContent = '集計中...';
+            try {
+                // サーバーの売上集計API (/api/sales/today) を呼び出す
+                const response = await fetch('/api/sales/today');
+                if (!response.ok) {
+                    throw new Error('集計サーバーとの通信に失敗しました。');
+                }
+                
+                const salesData = await response.json(); // { totalRevenue, totalItems, date }
+                
+                // 結果を表示
+                reportDiv.innerHTML = `
+                    <strong>${salesData.date} の売上</strong><br>
+                    売上点数: <strong>${salesData.totalItems} 点</strong><br>
+                    売上金額: <strong>${salesData.totalRevenue} 円</strong>
+                `;
+
+            } catch (error) {
+                reportDiv.textContent = `エラー: ${error.message}`;
+            }
+        });
+        // ★★★ 追加処理ここまで ★★★
+
+    </script>
+</body>
+</html>
