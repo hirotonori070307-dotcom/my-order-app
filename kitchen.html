@@ -9,19 +9,20 @@
         h1 { color: #333; }
         .order-list { list-style: none; padding: 0; }
         .order-item { 
-            border: 2px solid #007bff; /* 青 */
-            background: #f0f8ff;
-            padding: 15px; 
-            margin-bottom: 15px; 
-            border-radius: 8px;
+            border: 2px solid #007bff; background: #f0f8ff;
+            padding: 15px; margin-bottom: 15px; border-radius: 8px;
+        }
+        /* ★ 提供可能になった注文のスタイル ★ */
+        .order-item.ready {
+            border-color: #28a745; /* 緑色 */
+            background: #f0fff8;
         }
         .order-total { font-weight: bold; margin-top: 10px; font-size: 1.1em; }
         .btn-kitchen { background-color: #007bff; color: white; padding: 8px; border: none; cursor: pointer; }
-        .btn-call { background-color: #dc3545; } 
+        /* ★ 「提供可能」ボタンのスタイル ★ */
+        .btn-ready { background-color: #28a745; } 
 
-        .order-item.new {
-            animation: fadeIn 0.5s ease-out;
-        }
+        .order-item.new { animation: fadeIn 0.5s ease-out; }
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-20px); }
             to { opacity: 1; transform: translateY(0); }
@@ -35,35 +36,27 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io(); // サーバーに接続
+        const socket = io(); 
         const kitchenList = document.getElementById('kitchen-list');
 
-        // ★★★ ビープ音を鳴らす関数 ★★★
+        // ビープ音 (変更なし)
         let audioContext;
         function playBeep(duration = 0.4, frequency = 880) { 
             try {
-                if (!audioContext) {
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                }
+                if (!audioContext) { audioContext = new (window.AudioContext || window.webkitAudioContext)(); }
                 const oscillator = audioContext.createOscillator();
                 const gainNode = audioContext.createGain();
-                oscillator.connect(gainNode);
-                gainNode.connect(audioContext.destination);
-                
-                oscillator.type = 'square'; 
-                oscillator.frequency.value = frequency; 
+                oscillator.connect(gainNode); gainNode.connect(audioContext.destination);
+                oscillator.type = 'square'; oscillator.frequency.value = frequency; 
                 gainNode.gain.setValueAtTime(0, audioContext.currentTime);
                 gainNode.gain.linearRampToValueAtTime(0.5, audioContext.currentTime + 0.05); 
                 gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + duration); 
-                
                 oscillator.start(audioContext.currentTime);
                 oscillator.stop(audioContext.currentTime + duration);
-            } catch (e) {
-                console.error("ビープ音の再生に失敗:", e);
-            }
+            } catch (e) { console.error("ビープ音の再生に失敗:", e); }
         }
 
-        // 厨房リストに注文を追加する関数
+        // ★ 厨房リストに注文を追加する関数 (ボタン部分を修正)
         function addKitchenOrderToView(order) {
             if (document.getElementById(`order-kitchen-${order.id}`)) return;
             const li = document.createElement('li');
@@ -79,15 +72,17 @@
             itemsHtml += '</ul>';
 
             li.innerHTML = `
-                <h3>注文番号: ${order.id} (ステータス: ${order.status})</h3>
+                <h3 id="status-kitchen-${order.id}">注文番号: ${order.id} (ステータス: ${order.status})</h3>
                 ${itemsHtml}
                 <div class="order-total">合計: ${totalPrice}円</div> 
-                <button class="btn-kitchen" onclick="updateKitchenStatus(${order.id}, '調理中')">調理開始</button>
-                <button class="btn-kitchen btn-call" onclick="updateKitchenStatus(${order.id}, '準備完了')">
-                    準備完了（呼び出し）
+                
+                <button class="btn-kitchen" id="btn-cook-${order.id}" onclick="updateKitchenStatus(${order.id}, '調理中')">調理開始</button>
+                <button class="btn-kitchen btn-ready" id="btn-ready-${order.id}" onclick="markAsReady(${order.id})">
+                    提供可能
                 </button>
             `;
             kitchenList.prepend(li);
+            updateButtonState(order.id, order.status); // ボタンの状態を更新
             setTimeout(() => li.classList.remove('new'), 500);
         }
 
@@ -107,31 +102,66 @@
         socket.on('new_kitchen_order', (kitchenOrder) => {
             console.log('厨房向け受信:', kitchenOrder);
             addKitchenOrderToView(kitchenOrder);
-            
-            // ★ 2回鳴らす
-            playBeep(0.4, 880); // 1回目
-            setTimeout(() => {
-                playBeep(0.4, 880); // 0.6秒後にもう1回
-            }, 600);
+            playBeep(0.4, 880); 
+            setTimeout(() => { playBeep(0.4, 880); }, 600);
+        });
+        
+        // 3. ★★★ [NEW] ステータス更新を受信 (他の画面からの変更を反映) ★★★
+        socket.on('status_updated', (data) => {
+            updateStatusText(data.id, data.status);
+            updateButtonState(data.id, data.status);
+        });
+        
+        // 4. ★★★ [NEW] 提供可能通知の受信 (他の画面からの変更を反映) ★★★
+        socket.on('order_is_ready', (data) => {
+            updateStatusText(data.id, data.status);
+            updateButtonState(data.id, data.status);
         });
 
+
         // --- ボタン操作 ---
+
+        // ★ 「調理開始」ボタンの処理
         function updateKitchenStatus(orderId, newStatus) {
             console.log(`注文 ${orderId} を「${newStatus}」に変更`);
-            
-            if (newStatus === '準備完了') {
-                console.log(`お客様 ${orderId} を呼び出します`);
-                socket.emit('call_customer', { id: orderId });
+            // サーバーに「ステータス更新」を通知
+            socket.emit('update_status', { id: orderId, status: newStatus });
+        }
+        
+        // ★ 「提供可能」ボタンの処理
+        function markAsReady(orderId) {
+            console.log(`注文 ${orderId} を「提供可能」に変更`);
+            // サーバーに「提供可能」を通知
+            socket.emit('order_ready_for_pickup', { id: orderId });
+        }
+        
+        // --- 画面表示の更新用 ---
+        function updateStatusText(orderId, newStatus) {
+            const statusText = document.getElementById(`status-kitchen-${orderId}`);
+            if (statusText) {
+                statusText.textContent = `注文番号: ${orderId} (ステータス: ${newStatus})`;
             }
+            const li = document.getElementById(`order-kitchen-${orderId}`);
+            if (li && newStatus === '提供可能') {
+                li.classList.add('ready');
+            }
+        }
+
+        // ボタンの状態（押せる/押せない）を管理
+        function updateButtonState(orderId, status) {
+            const cookBtn = document.getElementById(`btn-cook-${orderId}`);
+            const readyBtn = document.getElementById(`btn-ready-${orderId}`);
+            if (!cookBtn || !readyBtn) return;
             
-            const item = document.getElementById(`order-kitchen-${orderId}`);
-            if (item) {
-                const h3 = item.querySelector('h3');
-                if (h3) h3.textContent = `注文番号: ${orderId} (ステータス: ${newStatus})`;
-                if (newStatus === '準備完了') {
-                    const callButton = item.querySelector('.btn-call');
-                    if(callButton) callButton.disabled = true;
-                }
+            if (status === '受付済') {
+                cookBtn.disabled = false;
+                readyBtn.disabled = true; // 調理開始しないと提供できない
+            } else if (status === '調理中') {
+                cookBtn.disabled = true;
+                readyBtn.disabled = false;
+            } else if (status === '提供可能') {
+                cookBtn.disabled = true;
+                readyBtn.disabled = true;
             }
         }
     </script>
