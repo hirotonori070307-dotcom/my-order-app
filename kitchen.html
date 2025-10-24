@@ -38,9 +38,9 @@
         const socket = io(); // サーバーに接続
         const kitchenList = document.getElementById('kitchen-list');
 
-        // ★★★ ビープ音を鳴らす関数 (音色を変更) ★★★
+        // ★★★ ビープ音を鳴らす関数 ★★★
         let audioContext;
-        function playBeep(duration = 0.4, frequency = 880) { // ★長さを0.4秒に変更
+        function playBeep(duration = 0.4, frequency = 880) { 
             try {
                 if (!audioContext) {
                     audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -50,8 +50,8 @@
                 oscillator.connect(gainNode);
                 gainNode.connect(audioContext.destination);
                 
-                oscillator.type = 'square'; // ★音色を「ピーッ」(矩形波)に変更
-                oscillator.frequency.value = frequency; // 周波数 (厨房は 880Hz)
+                oscillator.type = 'square'; 
+                oscillator.frequency.value = frequency; 
                 gainNode.gain.setValueAtTime(0, audioContext.currentTime);
                 gainNode.gain.linearRampToValueAtTime(0.5, audioContext.currentTime + 0.05); 
                 gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + duration); 
@@ -63,7 +63,7 @@
             }
         }
 
-        // 厨房リストに注文を追加する関数 (変更なし)
+        // 厨房リストに注文を追加する関数
         function addKitchenOrderToView(order) {
             if (document.getElementById(`order-kitchen-${order.id}`)) return;
             const li = document.createElement('li');
@@ -93,7 +93,7 @@
 
         // --- Socket.IO イベント受信 ---
 
-        // 1. 接続時 (変更なし)
+        // 1. 接続時
         socket.on('initial_orders', (orders) => {
             kitchenList.innerHTML = '';
             orders.reverse().forEach(order => {
@@ -108,14 +108,14 @@
             console.log('厨房向け受信:', kitchenOrder);
             addKitchenOrderToView(kitchenOrder);
             
-            // ★★★ 2回鳴らすように変更 ★★★
+            // ★ 2回鳴らす
             playBeep(0.4, 880); // 1回目
             setTimeout(() => {
                 playBeep(0.4, 880); // 0.6秒後にもう1回
             }, 600);
         });
 
-        // --- ボタン操作 --- (変更なし)
+        // --- ボタン操作 ---
         function updateKitchenStatus(orderId, newStatus) {
             console.log(`注文 ${orderId} を「${newStatus}」に変更`);
             
