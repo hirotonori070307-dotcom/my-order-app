@@ -7,15 +7,13 @@ const { Server } = require("socket.io");
 const path = require('path');
 const webpush = require('web-push'); 
 
-// ★★★ ここを修正 ★★★
-// Socket.IOサーバーを初期化する際に、CORS設定を追加します
+// Socket.IOのCORS設定
 const io = new Server(server, {
   cors: {
-    origin: "*", // すべてのドメインからの接続を許可（デバッグ用）
+    origin: "*", 
     methods: ["GET", "POST"]
   }
 });
-// ★★★ 修正ここまで ★★★
 
 let orders = [];
 let orderCounter = 1; 
@@ -27,7 +25,7 @@ const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 
 if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
-  console.warn("VAPIDキーが設定されていません。プッシュ通知は動作しません。");
+  console.warn("VAPIDキーが設定されていません。");
 } else {
   webpush.setVapidDetails(
     'mailto:test@example.com', 
@@ -38,35 +36,22 @@ if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
 }
 
 app.use(express.json());
-
-// --- 静的ファイルの配信 ---
 app.use(express.static(path.join(__dirname))); 
 
-// トップページ ( / ) に order.html を割り当てる
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'order.html'));
-});
+// --- ルーティング ---
+app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'order.html')); });
+app.get('/cashier', (req, res) => { res.sendFile(path.join(__dirname, 'cashier.html')); });
+app.get('/kitchen', (req, res) => { res.sendFile(path.join(__dirname, 'kitchen.html')); });
 
-// 各画面へのルーティング
-app.get('/cashier', (req, res) => {
-  res.sendFile(path.join(__dirname, 'cashier.html'));
-});
-
-app.get('/kitchen', (req, res) => {
-  res.sendFile(path.join(__dirname, 'kitchen.html'));
-});
-
-// [POST] /api/order : 支払い待ち注文の受付
+// --- API ---
+// [POST] /api/order (変更なし)
 app.post('/api/order', (req, res) => {
   const items = req.body.items;
   if (!items || items.length === 0) {
     return res.status(400).json({ message: '注文内容が空です。' });
   }
   const newOrder = {
-    id: orderCounter++,
-    items: items,
-    status: '支払い待ち', 
-    createdAt: new Date()
+    id: orderCounter++, items: items, status: '支払い待ち', createdAt: new Date()
   };
   orders.push(newOrder);
   console.log('支払い待ち注文:', newOrder);
@@ -77,10 +62,9 @@ app.post('/api/order', (req, res) => {
   });
 });
 
-// [GET] /api/sales/today : 売上集計API
+// [GET] /api/sales/today (変更なし)
 app.get('/api/sales/today', (req, res) => {
-    let totalRevenue = 0;
-    let totalItems = 0;
+    let totalRevenue = 0, totalItems = 0;
     const today = new Date();
     const todayString = today.getFullYear() + '-' + (today.getMonth() + 1).toString().padStart(2, '0') + '-' + today.getDate().toString().padStart(2, '0');
     orders.forEach(order => {
@@ -98,7 +82,7 @@ app.get('/api/sales/today', (req, res) => {
     res.json({ totalRevenue, totalItems, date: todayString });
 });
 
-// [POST] /api/subscribe : プッシュ通知の購読情報を登録
+// [POST] /api/subscribe (変更なし)
 app.post('/api/subscribe', (req, res) => {
   const subscription = req.body.subscription;
   const orderId = req.body.orderId;
@@ -111,34 +95,55 @@ app.post('/api/subscribe', (req, res) => {
 });
 
 
-// --- リアルタイム通信 (Socket.IO) の設定 ---
+// --- リアルタイム通信 (Socket.IO) ---
 io.on('connection', (socket) => {
   console.log('クライアントが接続しました:', socket.id);
   socket.emit('initial_orders', orders);
 
-  // レジからの「支払い完了」通知
+  // レジからの「支払い完了」 (変更なし)
   socket.on('confirm_payment', (data) => {
     const orderId = data.id;
     const order = orders.find(o => o.id === orderId);
     if (order && order.status === '支払い待ち') {
       order.status = '受付済';
-      io.emit('new_kitchen_order', order);
+      io.emit('new_kitchen_order', order); // 厨房とレジの両方に通知
+    }
+  });
+  
+  // ★★★ [NEW] 厨房・レジからの「ステータス更新」 (調理中など) ★★★
+  socket.on('update_status', (data) => {
+    const order = orders.find(o => o.id === data.id);
+    if (order) {
+      order.status = data.status;
+      console.log(`ステータス更新: ${data.id} -> ${data.status}`);
+      // 全ての管理画面にステータス変更を通知
+      io.emit('status_updated', { id: data.id, status: data.status });
     }
   });
 
-  // お客様画面からの「注文番号登録」
+  // ★★★ [NEW] 厨房からの「提供可能」通知 ★★★
+  socket.on('order_ready_for_pickup', (data) => {
+    const order = orders.find(o => o.id === data.id);
+    if (order) {
+      order.status = '提供可能';
+      console.log(`提供可能: ${data.id}`);
+      // レジ画面に「呼び出しボタン」を表示させるための通知
+      io.emit('order_is_ready', { id: data.id, status: '提供可能' });
+    }
+  });
+
+  // お客様画面からの「注文番号登録」 (変更なし)
   socket.on('register_customer', (data) => {
-    const orderId = data.orderId;
-    if (orderId) {
-      customerSockets[orderId] = socket.id;
-      console.log(`お客様登録 (Socket): 注文番号 ${orderId}`);
+    if (data.orderId) {
+      customerSockets[data.orderId] = socket.id;
+      console.log(`お客様登録 (Socket): 注文番号 ${data.orderId}`);
     }
   });
 
-  // 厨房画面からの「呼び出し」通知
+  // ★★★ レジ画面からの「呼び出し」 (以前は厨房からだった) ★★★
   socket.on('call_customer', (data) => {
     const orderId = data.id;
-    console.log(`厨房から呼び出し: 注文番号 ${orderId}`);
+    console.log(`レジから呼び出し: 注文番号 ${orderId}`);
     
     // 1. (フォアグラウンド通知)
     const targetSocketId = customerSockets[orderId];
@@ -154,7 +159,6 @@ io.on('connection', (socket) => {
         title: 'ご注文の準備ができました！',
         body: `注文番号: ${orderId} 番のお客様、カウンターまでお越しください。`,
       });
-      console.log(`お客様 ${orderId} へプッシュ通知送信`);
       webpush.sendNotification(subscription, payload)
         .then(() => {
           delete subscriptions[orderId];
@@ -169,7 +173,7 @@ io.on('connection', (socket) => {
     }
   });
   
-  // 接続が切れた時の処理
+  // 接続が切れた時の処理 (変更なし)
   socket.on('disconnect', () => {
     console.log('クライアントが切断しました:', socket.id);
     for (const orderId in customerSockets) {
@@ -182,8 +186,7 @@ io.on('connection', (socket) => {
   });
 });
 
-
-// --- サーバー起動 ---
+// --- サーバー起動 --- (変更なし)
 const PORT = process.env.PORT || 3000; 
 server.listen(PORT, () => {
   console.log(`サーバーが http://localhost:${PORT} で起動しました。`);
