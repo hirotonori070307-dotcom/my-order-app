@@ -12,6 +12,7 @@
         button { font-size: 1.2em; padding: 10px; cursor: pointer; }
         #message { margin-top: 20px; font-weight: bold; color: green; }
         #total { font-size: 1.3em; margin-top: 15px; font-weight: bold; }
+        
         .quantity-btn {
             font-size: 1em; padding: 3px 10px; margin: 0 5px;
             background-color: #eee; border: 1px solid #ccc; border-radius: 4px;
@@ -19,18 +20,26 @@
         .item-quantity { font-size: 1.1em; margin: 0 5px; display: inline-block; width: 20px; text-align: center; }
         #cart-list li { margin-bottom: 5px; display: flex; align-items: center; }
         .item-details { flex-grow: 1; }
+
         #message.ready {
-            color: #dc3545; font-size: 1.2em; padding: 15px;
-            border: 2px solid #dc3545; animation: flash 1s infinite;
+            color: #dc3545; /* 赤色 */
+            font-size: 1.2em;
+            padding: 15px;
+            border: 2px solid #dc3545;
+            animation: flash 1s infinite; /* 点滅アニメーション */
         }
-        @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+        @keyframes flash {
+            0% { opacity: 1; }
+            50% { opacity: 0.3; }
+            100% { opacity: 1; }
+        }
     </style>
 </head>
 <body>
     <h1>ご注文</h1>
     <div class="menu">
         <div class="menu-item">
-            <h3>牛串（塩コショウ）</h3><p>塩コショウで味付けされた牛串です。</p><p class="price">500円</p>
+            <h3>商品A</h3><p>説明文です。</p><p class="price">500円</p>
             <button class="add-to-cart" data-name="商品A" data-price="500">カートに入れる</button>
         </div>
         <div class="menu-item">
@@ -46,69 +55,44 @@
 
     <script>
         const socket = io();
-
-        // ★★★ VAPID公開鍵 (server.jsで設定したものと同じ) ★★★
-        // ここに、先ほどメモした「Public Key」を貼り付けてください
-        const VAPID_PUBLIC_KEY = 'ここに先ほど生成したPublic Keyを貼り付け';
-
         let cart = []; 
         const cartList = document.getElementById('cart-list');
         const submitButton = document.getElementById('submit-order');
         const menuButtons = document.querySelectorAll('.add-to-cart');
         const messageDiv = document.getElementById('message');
 
-        // ★★★ Service Workerとプッシュ通知の登録処理 ★★★
-        async function registerPush(orderId) {
-            try {
-                // 1. Service Workerの登録
-                const registration = await navigator.serviceWorker.register('/service-worker.js');
-                console.log('Service Worker 登録成功:', registration);
-
-                // 2. プッシュ通知の許可を求める
-                const permission = await Notification.requestPermission();
-                if (permission !== 'granted') {
-                    console.warn('通知が許可されませんでした。');
-                    messageDiv.textContent += ' (通知はオフです)';
-                    return;
-                }
-                console.log('通知が許可されました。');
-                
-                // 3. 購読情報を取得
-                const subscription = await registration.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: VAPID_PUBLIC_KEY
-                });
-                console.log('プッシュ購読情報:', subscription);
-
-                // 4. サーバーに購読情報を送信
-                await fetch('/api/subscribe', {
-                    method: 'POST',
-                    body: JSON.stringify({ subscription: subscription, orderId: orderId }),
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                console.log('サーバーに購読情報を送信しました。');
-
-            } catch (err) {
-                console.error('プッシュ登録エラー:', err);
-                messageDiv.textContent += ' (通知の登録に失敗)';
-            }
-        }
-
-        // ビープ音 (変更なし)
+        // ★★★ ビープ音用のAudioContextを先に定義 ★★★
         let audioContext;
-        function playBeep(duration = 0.3, frequency = 1200) {
+
+        // ビープ音を鳴らす関数
+        function playBeep(duration = 0.3, frequency = 1200) { 
             try {
-                if (!audioContext) { audioContext = new (window.AudioContext || window.webkitAudioContext)(); }
+                // ★ audioContext が未初期化なら初期化
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                // (Safari対策) もし一時停止(suspended)していたら再開
+                if (audioContext.state === 'suspended') {
+                    audioContext.resume();
+                }
+
                 const oscillator = audioContext.createOscillator();
                 const gainNode = audioContext.createGain();
-                oscillator.connect(gainNode); gainNode.connect(audioContext.destination);
-                oscillator.type = 'square'; oscillator.frequency.value = frequency; 
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                oscillator.type = 'square'; 
+                oscillator.frequency.value = frequency; 
                 gainNode.gain.setValueAtTime(0, audioContext.currentTime);
                 gainNode.gain.linearRampToValueAtTime(0.6, audioContext.currentTime + 0.05);
                 gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + duration);
+                
                 oscillator.start(audioContext.currentTime);
                 oscillator.stop(audioContext.currentTime + duration);
-            } catch (e) { console.error("ビープ音の再生に失敗:", e); }
+            } catch (e) {
+                console.error("ビープ音の再生に失敗:", e);
+                // ユーザーが一度も画面をクリックしていない場合、ここで失敗する
+            }
         }
 
         // カートに入れる処理 (変更なし)
@@ -122,6 +106,7 @@
                 updateCartView();
             });
         });
+
         // カート表示更新 (変更なし)
         function updateCartView() {
             const totalDiv = document.getElementById('total');
@@ -140,6 +125,7 @@
             });
             totalDiv.textContent = `合計金額: ${totalPrice}円`;
         }
+
         // 数量変更 (変更なし)
         cartList.addEventListener('click', (e) => {
             const target = e.target;
@@ -155,10 +141,28 @@
             updateCartView();
         });
 
-        // 「注文する」ボタンの処理 (変更あり)
+        // 「注文する」ボタンの処理
         submitButton.addEventListener('click', async () => {
             if (cart.length === 0) { alert('カートが空です。'); return; }
             messageDiv.textContent = '注文処理中...';
+
+            // ★★★ ここからが修正箇所 ★★★
+            // ユーザーがクリックした瞬間に、オーディオのロックを解除する
+            try {
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    console.log('AudioContextを初期化しました。');
+                }
+                if (audioContext.state === 'suspended') {
+                    audioContext.resume().then(() => {
+                        console.log('AudioContextを再開しました。(ロック解除)');
+                    });
+                }
+            } catch (e) {
+                console.error('AudioContextの初期化に失敗:', e);
+            }
+            // ★★★ 修正箇所ここまで ★★★
+
             try {
                 const response = await fetch('/api/order', {
                     method: 'POST',
@@ -168,18 +172,14 @@
                 const result = await response.json();
                 if (response.ok) {
                     messageDiv.textContent = `注文番号: ${result.orderId}。レジでお支払いください。`;
-                    
                     socket.emit('register_customer', { orderId: result.orderId });
                     
-                    // ★★★ プッシュ通知の登録を開始 ★★★
                     if ('serviceWorker' in navigator && 'PushManager' in window) {
-                        registerPush(result.orderId); // 注文IDを渡す
+                        registerPush(result.orderId); 
                     } else {
                         console.warn('プッシュ通知はサポートされていません。');
-                        messageDiv.textContent += ' (プッシュ通知非対応ブラウザ)';
                     }
                     
-                    // 画面ロック (変更なし)
                     cart = []; updateCartView(); submitButton.disabled = true; 
                     cartList.innerHTML = 'お支払いのため、この画面をレジで提示してください。';
                     menuButtons.forEach(btn => btn.disabled = true);
@@ -193,17 +193,45 @@
             }
         });
 
-        // ★ 厨房からの「呼び出し」を受信 (Socket.IO版)
+        // ★★★ 呼び出しを受信 (この部分は変更なし) ★★★
         socket.on('order_ready', () => {
-            console.log('Socket.IO 呼び出し通知を受信！');
+            console.log('呼び出し通知を受信！');
+            
+            // この時点で audioContext が「ロック解除」されているため、音が鳴るはず
             playBeep(0.3, 1200); 
             setTimeout(() => { playBeep(0.3, 1200); }, 500);
             setTimeout(() => { playBeep(0.3, 1200); }, 1000);
+            
             messageDiv.textContent = 'ご注文の準備ができました！カウンターまでお越しください。';
             messageDiv.className = 'ready'; 
-            if (document.hidden) { navigator.vibrate([200, 100, 200]); }
+
+            if (document.hidden) {
+                navigator.vibrate([200, 100, 200]); 
+            }
         });
+        
+        // ★ registerPush 関数 (変更なし、参考までに残します)
+        async function registerPush(orderId) {
+            try {
+                const registration = await navigator.serviceWorker.register('/service-worker.js');
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    console.warn('通知が許可されませんでした。');
+                    return;
+                }
+                const subscription = await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: VAPID_PUBLIC_KEY // このキーはHTML内に定義されている必要があります
+                });
+                await fetch('/api/subscribe', {
+                    method: 'POST',
+                    body: JSON.stringify({ subscription: subscription, orderId: orderId }),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } catch (err) {
+                console.error('プッシュ登録エラー:', err);
+            }
+        }
     </script>
 </body>
-
 </html>
