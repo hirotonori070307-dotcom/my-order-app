@@ -11,13 +11,12 @@
         .order-list { list-style: none; padding: 0; }
         .order-item { 
             padding: 15px; margin-bottom: 15px; border-radius: 8px; border: 2px solid;
-            background: #f0f8ff; /* 基本は青背景 */
-            border-color: #007bff;
+            background: #f0f8ff; border-color: #007bff;
         }
         .order-total { font-weight: bold; margin-top: 10px; font-size: 1.1em; }
         .btn-kitchen { color: white; padding: 8px; border: none; cursor: pointer; margin-top: 5px; }
-        .btn-start-cooking { background-color: #007bff; } /* 調理開始は青 */
-        .btn-complete-cooking { background-color: #28a745; } /* 調理完了は緑 */
+        .btn-start-cooking { background-color: #007bff; } 
+        .btn-complete-cooking { background-color: #28a745; } 
 
         .order-item.new { animation: fadeIn 0.5s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
@@ -28,7 +27,6 @@
         <h1>オーダー</h1>
         <ul id="order-list" class="order-list"></ul>
     </div>
-
     <div class="column">
         <h1>調理中</h1>
         <ul id="cooking-list" class="order-list"></ul>
@@ -37,14 +35,13 @@
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io(); 
-        const orderList = document.getElementById('order-list');     // ★ オーダーリスト
-        const cookingList = document.getElementById('cooking-list'); // ★ 調理中リスト
+        const orderList = document.getElementById('order-list');     
+        const cookingList = document.getElementById('cooking-list'); 
         
-        // ★ 注文リストアイテム作成 (ボタン部分を修正)
+        // 注文リストアイテム作成 (変更なし)
         function createOrderListItem(order) {
             let li = document.getElementById(`order-kitchen-${order.id}`);
             if (!li) { li = document.createElement('li'); li.id = `order-kitchen-${order.id}`; }
-            
             let itemsHtml = '<ul>';
             let totalPrice = 0;
             order.items.forEach(item => {
@@ -52,44 +49,35 @@
                 totalPrice += item.price * item.quantity;
             });
             itemsHtml += '</ul>';
-
-            // ボタンHTMLを動的に生成
             let buttonHtml = '';
             if (order.status === '受付済') {
                 buttonHtml = `<button class="btn-kitchen btn-start-cooking" onclick="startCooking(${order.id})">調理開始</button>`;
             } else if (order.status === '調理中') {
                 buttonHtml = `<button class="btn-kitchen btn-complete-cooking" onclick="completeCooking(${order.id})">調理完了</button>`;
             }
-
-            li.innerHTML = `
-                <h3>注文番号: ${order.id}</h3>
-                ${itemsHtml}
-                <div class="order-total">合計: ${totalPrice}円</div> 
-                ${buttonHtml} 
-            `;
+            li.innerHTML = `<h3>注文番号: ${order.id}</h3>${itemsHtml}<div class="order-total">合計: ${totalPrice}円</div> ${buttonHtml}`;
             return li;
         }
 
-        // ★ 注文を正しいリストに振り分け
+        // ★★★ 注文を正しいリストに振り分け (ここを修正) ★★★
         function sortOrder(order, isNew = false) {
             if (order.status === '支払い待ち') return; 
 
-            // 既存の要素があれば削除（リスト移動のため）
             const existingLi = document.getElementById(`order-kitchen-${order.id}`);
             if (existingLi) existingLi.remove();
 
-            // 新しいliを作成
+            // ★ 「提供可能」または「提供済み」になったら厨房画面からは削除する
+            if (order.status === '提供可能' || order.status === '提供済み') {
+                 return;
+            }
+            
             const li = createOrderListItem(order);
-
             if (order.status === '受付済') {
-                li.className = 'order-item'; // スタイルは基本のみ
+                li.className = 'order-item';
                 orderList.prepend(li);
             } else if (order.status === '調理中') {
                 li.className = 'order-item';
                 cookingList.prepend(li);
-            } else if (order.status === '提供可能') {
-                 // 提供可能になったらこの画面からは消える
-                 return;
             }
 
             if (isNew) {
@@ -106,28 +94,23 @@
 
         socket.on('new_kitchen_order', (kitchenOrder) => {
             console.log('新規オーダー受信:', kitchenOrder);
-            sortOrder(kitchenOrder, true); // オーダーリストに追加
+            sortOrder(kitchenOrder, true); 
         });
         
         socket.on('status_updated', (data) => {
             console.log('ステータス更新受信:', data);
-            sortOrder(data, false); // 調理中リストへ移動
+            sortOrder(data, false); // ★ 「提供済み」ならここで削除される
         });
         
-        // 提供可能になったらリストから削除
         socket.on('order_is_ready', (data) => {
             console.log('提供可能 受信（削除）:', data);
-            const li = document.getElementById(`order-kitchen-${data.id}`);
-            if (li) li.remove();
+            sortOrder(data, false); // ★ ここでも削除される
         });
 
-        // --- ボタン操作 ---
-        // ★ 「調理開始」ボタン
+        // --- ボタン操作 --- (変更なし)
         function startCooking(orderId) {
             socket.emit('update_status', { id: orderId, status: '調理中' });
         }
-        
-        // ★ 「調理完了」ボタン
         function completeCooking(orderId) {
             socket.emit('cooking_complete', { id: orderId });
         }
