@@ -5,49 +5,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>厨房 管理画面</title>
     <style>
-        /* ★ 画面を2分割 */
+        /* (スタイルは変更なし) */
         body { font-family: sans-serif; padding: 0 20px; display: flex; gap: 20px; }
         .column { flex: 1; height: 95vh; overflow-y: auto; }
-
         h1 { color: #333; }
         .order-list { list-style: none; padding: 0; }
         .order-item { 
             padding: 15px; margin-bottom: 15px; border-radius: 8px; border: 2px solid;
         }
-        
-        /* ★ 調理中リストのスタイル (受付済、調理中) */
-        .order-item.cooking {
-            border-color: #007bff; /* 青 */
-            background: #f0f8ff;
-        }
-        /* ★ 提供可能リストのスタイル ★ */
-        .order-item.ready {
-            border-color: #28a745; /* 緑 */
-            background: #f0fff8;
-        }
-
+        .order-item.cooking { border-color: #007bff; background: #f0f8ff; }
+        .order-item.ready { border-color: #28a745; background: #f0fff8; }
         .order-total { font-weight: bold; margin-top: 10px; font-size: 1.1em; }
         .btn-kitchen { background-color: #007bff; color: white; padding: 8px; border: none; cursor: pointer; }
         .btn-ready { background-color: #28a745; } 
-
         .order-item.new { animation: fadeIn 0.5s ease-out; }
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-20px); }
             to { opacity: 1; transform: translateY(0); }
         }
+        #audio-unlock-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.7); color: white; 
+            display: flex; justify-content: center; align-items: center; 
+            font-size: 1.5em; z-index: 1000; cursor: pointer;
+        }
     </style>
 </head>
 <body>
-    <div class="column">
-        <h1>調理中</h1>
-        <ul id="cooking-list" class="order-list">
-            </ul>
+    <div id="audio-unlock-overlay">
+        ( 画面をタップして音声通知を有効化 )
     </div>
 
     <div class="column">
+        <h1>調理中</h1>
+        <ul id="cooking-list" class="order-list"></ul>
+    </div>
+    <div class="column">
         <h1>提供可能</h1>
-        <ul id="ready-list" class="order-list">
-            </ul>
+        <ul id="ready-list" class="order-list"></ul>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -55,34 +50,48 @@
         const socket = io(); 
         const cookingList = document.getElementById('cooking-list');
         const readyList = document.getElementById('ready-list');
+        const audioOverlay = document.getElementById('audio-unlock-overlay');
 
-        // ビープ音 (変更なし)
-        let audioContext;
-        function playBeep(duration = 0.4, frequency = 880) { 
-            try {
-                if (!audioContext) { audioContext = new (window.AudioContext || window.webkitAudioContext)(); }
-                const oscillator = audioContext.createOscillator();
-                const gainNode = audioContext.createGain();
-                oscillator.connect(gainNode); gainNode.connect(audioContext.destination);
-                oscillator.type = 'square'; oscillator.frequency.value = frequency; 
-                gainNode.gain.setValueAtTime(0, audioContext.currentTime);
-                gainNode.gain.linearRampToValueAtTime(0.5, audioContext.currentTime + 0.05); 
-                gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + duration); 
-                oscillator.start(audioContext.currentTime);
-                oscillator.stop(audioContext.currentTime + duration);
-            } catch (e) { console.error("ビープ音の再生に失敗:", e); }
+        // ★★★ [MODIFIED] MP3ファイルを準備 ★★★
+        const kitchenNotifySound = new Audio('/kitchen-notify.mp3'); // 厨房用MP3ファイル名
+        kitchenNotifySound.preload = 'auto'; // 事前に読み込む
+        let audioUnlocked = false;
+
+        // ★★★ [MODIFIED] 音声ロック解除の処理 ★★★
+        function unlockAudio() {
+            if (audioUnlocked) return;
+            // ユーザーのクリック操作で一度再生(ミュート)し、ブラウザの制限を解除
+            kitchenNotifySound.muted = true;
+            kitchenNotifySound.play().then(() => {
+                kitchenNotifySound.pause();
+                kitchenNotifySound.currentTime = 0;
+                kitchenNotifySound.muted = false;
+                audioUnlocked = true;
+                audioOverlay.style.display = 'none'; // オーバーレイを隠す
+                console.log('音声ロック解除 成功');
+            }).catch(e => {
+                console.error('音声ロック解除 失敗:', e);
+                audioOverlay.textContent = 'エラー: 音声が初期化できません';
+            });
+        }
+        audioOverlay.addEventListener('click', unlockAudio);
+
+        // ★★★ [MODIFIED] MP3を再生する関数 ★★★
+        function playSound() { 
+            if (!audioUnlocked) {
+                console.warn('音声がロックされています。画面をクリックしてください。');
+                audioOverlay.style.display = 'flex'; // 再度表示
+                return;
+            }
+            // MP3を再生
+            kitchenNotifySound.currentTime = 0; // 再生位置を最初に戻す
+            kitchenNotifySound.play().catch(e => console.error("音声の再生に失敗:", e));
         }
 
-        // ★★★ 注文リストのアイテム(li)を作成・更新する関数 ★★★
+        // 注文リストのアイテム(li)を作成・更新する関数 (変更なし)
         function createOrderListItem(order) {
             let li = document.getElementById(`order-kitchen-${order.id}`);
-            // 既存のliがなければ新しく作成
-            if (!li) {
-                li = document.createElement('li');
-                li.id = `order-kitchen-${order.id}`;
-            }
-            
-            // 注文内容
+            if (!li) { li = document.createElement('li'); li.id = `order-kitchen-${order.id}`; }
             let itemsHtml = '<ul>';
             let totalPrice = 0;
             order.items.forEach(item => {
@@ -90,100 +99,63 @@
                 totalPrice += item.price * item.quantity;
             });
             itemsHtml += '</ul>';
-
-            // ボタンの状態を決定
             const isAccepted = (order.status === '受付済');
             const isCooking = (order.status === '調理中');
             const isReady = (order.status === '提供可能');
-
-            // liの中身を更新
             li.innerHTML = `
                 <h3>注文番号: ${order.id} (ステータス: ${order.status})</h3>
                 ${itemsHtml}
                 <div class="order-total">合計: ${totalPrice}円</div> 
-                
-                <button class="btn-kitchen" onclick="updateKitchenStatus(${order.id}, '調理中')" 
-                    ${isCooking || isReady ? 'disabled' : ''}>
-                    調理開始
-                </button>
-                <button class="btn-kitchen btn-ready" onclick="markAsReady(${order.id})"
-                    ${isAccepted || isReady ? 'disabled' : ''}>
-                    提供可能
-                </button>
+                <button class="btn-kitchen" onclick="updateKitchenStatus(${order.id}, '調理中')" ${isCooking || isReady ? 'disabled' : ''}>調理開始</button>
+                <button class="btn-kitchen btn-ready" onclick="markAsReady(${order.id})" ${isAccepted || isReady ? 'disabled' : ''}>提供可能</button>
             `;
-            
             return li;
         }
 
-        // ★★★ 注文を正しいリストに振り分ける関数 ★★★
+        // 注文を正しいリストに振り分ける関数 (★ playBeep -> playSound に変更)
         function sortOrder(order, isNew = false) {
-            // 支払い待ち注文は厨房に関係ない
             if (order.status === '支払い待ち') return; 
-
-            // 注文アイテム(li)を作成または取得
             const li = createOrderListItem(order);
-
             if (order.status === '提供可能') {
-                // 「提供可能」リストへ移動
                 li.className = 'order-item ready';
                 readyList.prepend(li);
             } else {
-                // 「調理中」リストへ移動 (受付済 or 調理中)
                 li.className = 'order-item cooking';
                 cookingList.prepend(li);
             }
-
-            // 新規注文の場合のみアニメーションと音
             if (isNew) {
                 li.classList.add('new');
                 setTimeout(() => li.classList.remove('new'), 500);
                 
-                // 音を鳴らす
-                playBeep(0.4, 880); 
-                setTimeout(() => { playBeep(0.4, 880); }, 600);
+                // ★★★ MP3を鳴らす ★★★
+                playSound(); 
+                setTimeout(() => { playSound(); }, 1000); // 1秒後にもう1回
             }
         }
 
-
-        // --- Socket.IO イベント受信 ---
-
-        // 1. 接続時
+        // --- Socket.IO イベント受信 --- (変更なし)
         socket.on('initial_orders', (orders) => {
-            cookingList.innerHTML = '';
-            readyList.innerHTML = '';
-            orders.reverse().forEach(order => {
-                sortOrder(order, false); // 振り分け
-            });
+            cookingList.innerHTML = ''; readyList.innerHTML = '';
+            orders.reverse().forEach(order => { sortOrder(order, false); });
         });
-
-        // 2. 「厨房向け」新規注文を受信
         socket.on('new_kitchen_order', (kitchenOrder) => {
             console.log('厨房向け受信:', kitchenOrder);
-            sortOrder(kitchenOrder, true); // 振り分け (新規)
+            sortOrder(kitchenOrder, true); 
         });
-        
-        // 3. ステータス更新を受信 (調理中)
         socket.on('status_updated', (data) => {
             console.log('ステータス更新受信:', data);
-            sortOrder(data, false); // 振り分け
+            sortOrder(data, false); 
         });
-        
-        // 4. 「提供可能」通知を受信 (レジ側からの変更も含む)
         socket.on('order_is_ready', (data) => {
             console.log('提供可能 受信:', data);
-            sortOrder(data, false); // 振り分け (提供可能リストへ移動)
+            sortOrder(data, false); 
         });
 
-
-        // --- ボタン操作 ---
-
-        // ★ 「調理開始」ボタンの処理
+        // --- ボタン操作 --- (変更なし)
         function updateKitchenStatus(orderId, newStatus) {
             console.log(`注文 ${orderId} を「${newStatus}」に変更`);
             socket.emit('update_status', { id: orderId, status: newStatus });
         }
-        
-        // ★ 「提供可能」ボタンの処理
         function markAsReady(orderId) {
             console.log(`注文 ${orderId} を「提供可能」に変更`);
             socket.emit('order_ready_for_pickup', { id: orderId });
