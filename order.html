@@ -6,13 +6,13 @@
     <title>お客様 注文画面</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
+        /* (スタイルは変更なし) */
         body { font-family: sans-serif; padding: 20px; }
         .menu-item { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
         .price { font-size: 1.1em; font-weight: bold; color: #d9534f; }
         button { font-size: 1.2em; padding: 10px; cursor: pointer; }
         #message { margin-top: 20px; font-weight: bold; color: green; }
         #total { font-size: 1.3em; margin-top: 15px; font-weight: bold; }
-        
         .quantity-btn {
             font-size: 1em; padding: 3px 10px; margin: 0 5px;
             background-color: #eee; border: 1px solid #ccc; border-radius: 4px;
@@ -20,19 +20,11 @@
         .item-quantity { font-size: 1.1em; margin: 0 5px; display: inline-block; width: 20px; text-align: center; }
         #cart-list li { margin-bottom: 5px; display: flex; align-items: center; }
         .item-details { flex-grow: 1; }
-
         #message.ready {
-            color: #dc3545; /* 赤色 */
-            font-size: 1.2em;
-            padding: 15px;
-            border: 2px solid #dc3545;
-            animation: flash 1s infinite; /* 点滅アニメーション */
+            color: #dc3545; font-size: 1.2em; padding: 15px;
+            border: 2px solid #dc3545; animation: flash 1s infinite;
         }
-        @keyframes flash {
-            0% { opacity: 1; }
-            50% { opacity: 0.3; }
-            100% { opacity: 1; }
-        }
+        @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
@@ -60,39 +52,37 @@
         const submitButton = document.getElementById('submit-order');
         const menuButtons = document.querySelectorAll('.add-to-cart');
         const messageDiv = document.getElementById('message');
+        
+        // ★★★ VAPID公開鍵 (Renderの環境変数の値) ★★★
+        const VAPID_PUBLIC_KEY = 'ここにVAPID公開鍵を貼り付け'; 
 
-        // ★★★ ビープ音用のAudioContextを先に定義 ★★★
-        let audioContext;
+        // ★★★ [MODIFIED] MP3ファイルを準備 ★★★
+        const customerCallSound = new Audio('/customer-call.mp3'); // お客様呼び出し用MP3ファイル名
+        customerCallSound.preload = 'auto';
+        let audioUnlocked = false;
 
-        // ビープ音を鳴らす関数
-        function playBeep(duration = 0.3, frequency = 1200) { 
-            try {
-                // ★ audioContext が未初期化なら初期化
-                if (!audioContext) {
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                }
-                // (Safari対策) もし一時停止(suspended)していたら再開
-                if (audioContext.state === 'suspended') {
-                    audioContext.resume();
-                }
-
-                const oscillator = audioContext.createOscillator();
-                const gainNode = audioContext.createGain();
-                oscillator.connect(gainNode);
-                gainNode.connect(audioContext.destination);
-                
-                oscillator.type = 'square'; 
-                oscillator.frequency.value = frequency; 
-                gainNode.gain.setValueAtTime(0, audioContext.currentTime);
-                gainNode.gain.linearRampToValueAtTime(0.6, audioContext.currentTime + 0.05);
-                gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + duration);
-                
-                oscillator.start(audioContext.currentTime);
-                oscillator.stop(audioContext.currentTime + duration);
-            } catch (e) {
-                console.error("ビープ音の再生に失敗:", e);
-                // ユーザーが一度も画面をクリックしていない場合、ここで失敗する
+        // ★★★ [MODIFIED] MP3を再生する関数 ★★★
+        function playSound() { 
+            if (!audioUnlocked) {
+                console.warn('音声がロックされています。');
+                // ロックされていても、プッシュ通知のバイブレーションは動く
+                return; 
             }
+            customerCallSound.currentTime = 0;
+            customerCallSound.play().catch(e => console.error("音声の再生に失敗:", e));
+        }
+        
+        // ★★★ [MODIFIED] 音声ロック解除（注文ボタンと連動） ★★★
+        function unlockAudio() {
+            if (audioUnlocked) return;
+            customerCallSound.muted = true;
+            customerCallSound.play().then(() => {
+                customerCallSound.pause();
+                customerCallSound.currentTime = 0;
+                customerCallSound.muted = false;
+                audioUnlocked = true;
+                console.log('音声ロック解除 成功');
+            }).catch(e => console.error('音声ロック解除 失敗:', e));
         }
 
         // カートに入れる処理 (変更なし)
@@ -141,27 +131,13 @@
             updateCartView();
         });
 
-        // 「注文する」ボタンの処理
+        // 「注文する」ボタンの処理 (★ unlockAudio を追加)
         submitButton.addEventListener('click', async () => {
             if (cart.length === 0) { alert('カートが空です。'); return; }
             messageDiv.textContent = '注文処理中...';
 
-            // ★★★ ここからが修正箇所 ★★★
-            // ユーザーがクリックした瞬間に、オーディオのロックを解除する
-            try {
-                if (!audioContext) {
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    console.log('AudioContextを初期化しました。');
-                }
-                if (audioContext.state === 'suspended') {
-                    audioContext.resume().then(() => {
-                        console.log('AudioContextを再開しました。(ロック解除)');
-                    });
-                }
-            } catch (e) {
-                console.error('AudioContextの初期化に失敗:', e);
-            }
-            // ★★★ 修正箇所ここまで ★★★
+            // ★★★ オーディオのロック解除 ★★★
+            unlockAudio();
 
             try {
                 const response = await fetch('/api/order', {
@@ -193,14 +169,14 @@
             }
         });
 
-        // ★★★ 呼び出しを受信 (この部分は変更なし) ★★★
+        // ★ 厨房からの「呼び出し」を受信 (★ playBeep -> playSound に変更)
         socket.on('order_ready', () => {
             console.log('呼び出し通知を受信！');
             
-            // この時点で audioContext が「ロック解除」されているため、音が鳴るはず
-            playBeep(0.3, 1200); 
-            setTimeout(() => { playBeep(0.3, 1200); }, 500);
-            setTimeout(() => { playBeep(0.3, 1200); }, 1000);
+            // ★★★ MP3を鳴らす ★★★
+            playSound();
+            setTimeout(() => { playSound(); }, 1200); // 1.2秒後にもう1回
+            setTimeout(() => { playSound(); }, 2400); // 2.4秒後にもう1回
             
             messageDiv.textContent = 'ご注文の準備ができました！カウンターまでお越しください。';
             messageDiv.className = 'ready'; 
@@ -210,7 +186,7 @@
             }
         });
         
-        // ★ registerPush 関数 (変更なし、参考までに残します)
+        // registerPush 関数 (変更なし)
         async function registerPush(orderId) {
             try {
                 const registration = await navigator.serviceWorker.register('/service-worker.js');
@@ -221,7 +197,7 @@
                 }
                 const subscription = await registration.pushManager.subscribe({
                     userVisibleOnly: true,
-                    applicationServerKey: VAPID_PUBLIC_KEY // このキーはHTML内に定義されている必要があります
+                    applicationServerKey: VAPID_PUBLIC_KEY 
                 });
                 await fetch('/api/subscribe', {
                     method: 'POST',
