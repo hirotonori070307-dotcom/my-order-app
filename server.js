@@ -100,34 +100,41 @@ io.on('connection', (socket) => {
   console.log('クライアントが接続しました:', socket.id);
   socket.emit('initial_orders', orders);
 
-  // レジからの「支払い完了」 (変更なし)
+  // ★★★ レジからの「支払い完了」 (修正) ★★★
   socket.on('confirm_payment', (data) => {
     const orderId = data.id;
     const order = orders.find(o => o.id === orderId);
     if (order && order.status === '支払い待ち') {
       order.status = '受付済';
-      io.emit('new_kitchen_order', order); // 厨房とレジの両方に通知
+      
+      // 1. 管理画面（厨房・レジ）に通知
+      io.emit('new_kitchen_order', order);
+      
+      // 2. ★ [NEW] 特定のお客様に「支払い完了」（レシート情報）を通知 ★
+      const targetSocketId = customerSockets[orderId];
+      if (targetSocketId) {
+        io.to(targetSocketId).emit('payment_confirmed', order); // レシート情報を送信
+        console.log(`お客様 ${orderId} へ支払い完了通知を送信`);
+      }
     }
   });
   
-  // ★★★ [NEW] 厨房・レジからの「ステータス更新」 (調理中など) ★★★
+  // [NEW] 厨房・レジからの「ステータス更新」 (変更なし)
   socket.on('update_status', (data) => {
     const order = orders.find(o => o.id === data.id);
     if (order) {
       order.status = data.status;
       console.log(`ステータス更新: ${data.id} -> ${data.status}`);
-      // 全ての管理画面にステータス変更を通知
       io.emit('status_updated', { id: data.id, status: data.status });
     }
   });
 
-  // ★★★ [NEW] 厨房からの「提供可能」通知 ★★★
+  // [NEW] 厨房からの「提供可能」通知 (変更なし)
   socket.on('order_ready_for_pickup', (data) => {
     const order = orders.find(o => o.id === data.id);
     if (order) {
       order.status = '提供可能';
       console.log(`提供可能: ${data.id}`);
-      // レジ画面に「呼び出しボタン」を表示させるための通知
       io.emit('order_is_ready', { id: data.id, status: '提供可能' });
     }
   });
@@ -140,19 +147,16 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ★★★ レジ画面からの「呼び出し」 (以前は厨房からだった) ★★★
+  // レジ画面からの「呼び出し」 (変更なし)
   socket.on('call_customer', (data) => {
     const orderId = data.id;
     console.log(`レジから呼び出し: 注文番号 ${orderId}`);
     
-    // 1. (フォアグラウンド通知)
     const targetSocketId = customerSockets[orderId];
     if (targetSocketId) {
       io.to(targetSocketId).emit('order_ready');
-      console.log(`お客様 ${orderId} へSocket通知送信`);
     }
 
-    // 2. (バックグラウンド通知)
     const subscription = subscriptions[orderId];
     if (subscription) {
       const payload = JSON.stringify({
