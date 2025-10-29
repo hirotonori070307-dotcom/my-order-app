@@ -6,13 +6,13 @@
     <title>お客様 注文画面</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
-        /* (スタイルは変更なし) */
         body { font-family: sans-serif; padding: 20px; }
         .menu-item { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
         .price { font-size: 1.1em; font-weight: bold; color: #d9534f; }
         button { font-size: 1.2em; padding: 10px; cursor: pointer; }
         #message { margin-top: 20px; font-weight: bold; color: green; }
         #total { font-size: 1.3em; margin-top: 15px; font-weight: bold; }
+        
         .quantity-btn {
             font-size: 1em; padding: 3px 10px; margin: 0 5px;
             background-color: #eee; border: 1px solid #ccc; border-radius: 4px;
@@ -20,18 +20,43 @@
         .item-quantity { font-size: 1.1em; margin: 0 5px; display: inline-block; width: 20px; text-align: center; }
         #cart-list li { margin-bottom: 5px; display: flex; align-items: center; }
         .item-details { flex-grow: 1; }
+
         #message.ready {
             color: #dc3545; font-size: 1.2em; padding: 15px;
             border: 2px solid #dc3545; animation: flash 1s infinite;
         }
         @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+
+        /* ★★★ [NEW] レシート用のスタイル ★★★ */
+        #receipt {
+            border: 2px dashed #333;
+            background: #fafafa;
+            padding: 15px;
+            margin-top: 10px;
+        }
+        #receipt h2, #receipt h3 {
+            text-align: center;
+            margin: 10px 0;
+        }
+        #receipt ul {
+            list-style: none;
+            padding: 0;
+        }
+        #receipt li {
+            margin-bottom: 5px;
+            border-bottom: 1px dotted #ccc;
+            padding-bottom: 5px;
+        }
+        #receipt p {
+            font-size: 0.9em;
+        }
     </style>
 </head>
 <body>
     <h1>ご注文</h1>
     <div class="menu">
         <div class="menu-item">
-            <h3>牛串（塩コショウ）</h3><p>塩コショウで味付けされた牛串です。</p><p class="price">500円</p>
+            <h3>商品A</h3><p>説明文です。</p><p class="price">500円</p>
             <button class="add-to-cart" data-name="商品A" data-price="500">カートに入れる</button>
         </div>
         <div class="menu-item">
@@ -52,27 +77,24 @@
         const submitButton = document.getElementById('submit-order');
         const menuButtons = document.querySelectorAll('.add-to-cart');
         const messageDiv = document.getElementById('message');
+        const totalDiv = document.getElementById('total'); // totalDivも取得
         
-        // ★★★ VAPID公開鍵 (Renderの環境変数の値) ★★★
-        const VAPID_PUBLIC_KEY = BAoAi-ufJ4-0DmT7deTIt7XciP2h2uaIT298QxdfBn3YCkM-11mpduc9hkyyHUEUwXqmd-F3it0__q-BDW0-kUk; 
+        // ★ VAPID公開鍵 (Renderの環境変数の値)
+        const VAPID_PUBLIC_KEY = 'BAoAi-ufJ4-0DmT7deTIt7XciP2h2uaIT298QxdfBn3YCkM-11mpduc9hkyyHUEUwXqmd-F3it0__q-BDW0-kUk'; 
 
-        // ★★★ [MODIFIED] MP3ファイルを準備 ★★★
-        const customerCallSound = new Audio('/customer-call.mp3'); // お客様呼び出し用MP3ファイル名
+        // MP3ファイルを準備
+        const customerCallSound = new Audio('/customer-call.mp3');
         customerCallSound.preload = 'auto';
         let audioUnlocked = false;
 
-        // ★★★ [MODIFIED] MP3を再生する関数 ★★★
+        // MP3を再生する関数
         function playSound() { 
-            if (!audioUnlocked) {
-                console.warn('音声がロックされています。');
-                // ロックされていても、プッシュ通知のバイブレーションは動く
-                return; 
-            }
+            if (!audioUnlocked) { return; }
             customerCallSound.currentTime = 0;
             customerCallSound.play().catch(e => console.error("音声の再生に失敗:", e));
         }
         
-        // ★★★ [MODIFIED] 音声ロック解除（注文ボタンと連動） ★★★
+        // 音声ロック解除
         function unlockAudio() {
             if (audioUnlocked) return;
             customerCallSound.muted = true;
@@ -99,7 +121,6 @@
 
         // カート表示更新 (変更なし)
         function updateCartView() {
-            const totalDiv = document.getElementById('total');
             cartList.innerHTML = ''; 
             let totalPrice = 0;
             cart.forEach((item, index) => {
@@ -131,14 +152,11 @@
             updateCartView();
         });
 
-        // 「注文する」ボタンの処理 (★ unlockAudio を追加)
+        // 「注文する」ボタンの処理 (変更なし)
         submitButton.addEventListener('click', async () => {
             if (cart.length === 0) { alert('カートが空です。'); return; }
             messageDiv.textContent = '注文処理中...';
-
-            // ★★★ オーディオのロック解除 ★★★
-            unlockAudio();
-
+            unlockAudio(); // 音声ロック解除
             try {
                 const response = await fetch('/api/order', {
                     method: 'POST',
@@ -149,17 +167,12 @@
                 if (response.ok) {
                     messageDiv.textContent = `注文番号: ${result.orderId}。レジでお支払いください。`;
                     socket.emit('register_customer', { orderId: result.orderId });
-                    
                     if ('serviceWorker' in navigator && 'PushManager' in window) {
                         registerPush(result.orderId); 
-                    } else {
-                        console.warn('プッシュ通知はサポートされていません。');
                     }
-                    
                     cart = []; updateCartView(); submitButton.disabled = true; 
                     cartList.innerHTML = 'お支払いのため、この画面をレジで提示してください。';
                     menuButtons.forEach(btn => btn.disabled = true);
-                    cartList.replaceWith(cartList.cloneNode(true)); 
                 } else {
                     messageDiv.textContent = `エラー: ${result.message}`;
                 }
@@ -169,21 +182,54 @@
             }
         });
 
-        // ★ 厨房からの「呼び出し」を受信 (★ playBeep -> playSound に変更)
+        // ★★★ [NEW] 支払い完了（デジタルレシート）を受信 ★★★
+        socket.on('payment_confirmed', (order) => {
+            console.log('支払い完了通知（レシート）を受信:', order);
+
+            // ロック画面の内容をクリア
+            cartList.innerHTML = ''; 
+            totalDiv.style.display = 'none'; // 「合計金額: 0円」を隠す
+            
+            // 合計金額を計算
+            let totalPrice = 0;
+            let itemsHtml = '<ul>';
+            order.items.forEach(item => {
+                itemsHtml += `<li>${item.name} (${item.price}円) x ${item.quantity}</li>`;
+                totalPrice += item.price * item.quantity;
+            });
+            itemsHtml += '</ul>';
+
+            // レシート情報を作成
+            const receiptDiv = document.createElement('div');
+            receiptDiv.id = 'receipt';
+            receiptDiv.innerHTML = `
+                <h2>領収書</h2>
+                <p><strong>ご注文番号: ${order.id}</strong></p>
+                <p>日時: ${new Date(order.createdAt).toLocaleString('ja-JP')}</p>
+                <hr>
+                ${itemsHtml}
+                <hr>
+                <h3>合計金額: ${totalPrice} 円</h3>
+                <p>(お支払い: 現金)</p>
+            `;
+            
+            // 画面にレシートを挿入
+            cartList.appendChild(receiptDiv);
+
+            // メッセージも変更
+            messageDiv.textContent = 'お支払いが完了しました。商品ができるまでお待ちください。';
+            messageDiv.className = ''; // 点滅スタイルをリセット
+        });
+
+        // 呼び出し受信 (変更なし)
         socket.on('order_ready', () => {
             console.log('呼び出し通知を受信！');
-            
-            // ★★★ MP3を鳴らす ★★★
             playSound();
-            setTimeout(() => { playSound(); }, 1200); // 1.2秒後にもう1回
-            setTimeout(() => { playSound(); }, 2400); // 2.4秒後にもう1回
-            
+            setTimeout(() => { playSound(); }, 1200);
+            setTimeout(() => { playSound(); }, 2400);
             messageDiv.textContent = 'ご注文の準備ができました！カウンターまでお越しください。';
             messageDiv.className = 'ready'; 
-
-            if (document.hidden) {
-                navigator.vibrate([200, 100, 200]); 
-            }
+            if (document.hidden) { navigator.vibrate([200, 100, 200]); }
         });
         
         // registerPush 関数 (変更なし)
@@ -191,10 +237,7 @@
             try {
                 const registration = await navigator.serviceWorker.register('/service-worker.js');
                 const permission = await Notification.requestPermission();
-                if (permission !== 'granted') {
-                    console.warn('通知が許可されませんでした。');
-                    return;
-                }
+                if (permission !== 'granted') { return; }
                 const subscription = await registration.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey: VAPID_PUBLIC_KEY 
@@ -204,11 +247,8 @@
                     body: JSON.stringify({ subscription: subscription, orderId: orderId }),
                     headers: { 'Content-Type': 'application/json' }
                 });
-            } catch (err) {
-                console.error('プッシュ登録エラー:', err);
-            }
+            } catch (err) { console.error('プッシュ登録エラー:', err); }
         }
     </script>
 </body>
 </html>
-
