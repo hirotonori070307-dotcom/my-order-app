@@ -83,24 +83,22 @@ io.on('connection', (socket) => {
     }
   });
   
-  // ★★★ 厨房からの「ステータス更新」 (ここを修正) ★★★
+  // 厨房からの「ステータス更新」 (調理中) (変更なし)
   socket.on('update_status', ({ id, status }) => {
     const order = orders.find(o => o.id === id);
     if (order && order.status !== '提供可能') { 
       order.status = status;
       console.log(`ステータス更新: ${id} -> ${status}`);
-      // ★ 修正点: { id, status } ではなく、 order オブジェクト全体を送る
       io.emit('status_updated', order);
     }
   });
 
-  // ★★★ 厨房からの「調理完了」通知 (ここを修正) ★★★
+  // 厨房からの「調理完了」通知 (変更なし)
   socket.on('cooking_complete', ({ id }) => {
     const order = orders.find(o => o.id === id);
     if (order && order.status === '調理中') {
       order.status = '提供可能';
       console.log(`調理完了: ${id}`);
-      // ★ 修正点: { id, status } ではなく、 order オブジェクト全体を送る
       io.emit('order_is_ready', order);
     }
   });
@@ -110,9 +108,20 @@ io.on('connection', (socket) => {
     if (orderId) customerSockets[orderId] = socket.id;
   });
 
-  // レジ画面からの「呼び出し」 (変更なし)
+  // ★★★ レジ画面からの「呼び出し」 (ここを修正) ★★★
   socket.on('call_customer', ({ id }) => {
     console.log(`レジから呼び出し: 注文番号 ${id}`);
+    const order = orders.find(o => o.id === id); // ★ order を取得
+    
+    // ★ ステータスを「提供済み」に変更
+    if (order && order.status === '提供可能') {
+        order.status = '提供済み';
+        console.log(`ステータス更新: ${id} -> 提供済み`);
+        // ★ 全管理画面にステータス更新を通知
+        io.emit('status_updated', order); 
+    }
+
+    // お客様への通知（変更なし）
     const targetSocketId = customerSockets[id];
     if (targetSocketId) io.to(targetSocketId).emit('order_ready');
 
@@ -127,10 +136,4 @@ io.on('connection', (socket) => {
   
   // 切断処理 (変更なし)
   socket.on('disconnect', () => {
-    for (const orderId in customerSockets) { if (customerSockets[orderId] === socket.id) delete customerSockets[orderId]; }
-  });
-});
-
-// --- サーバー起動 --- (変更なし)
-const PORT = process.env.PORT || 3000; 
-server.listen(PORT, () => console.log(`サーバー起動: http://localhost:${PORT}`));
+    for (const orderId in customerSockets) { if (customerSockets[order
