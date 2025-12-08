@@ -12,55 +12,35 @@
         button { font-size: 1.2em; padding: 10px; cursor: pointer; }
         #message { margin-top: 20px; font-weight: bold; color: green; }
         #total { font-size: 1.3em; margin-top: 15px; font-weight: bold; }
-        
-        .quantity-btn {
-            font-size: 1em; padding: 3px 10px; margin: 0 5px;
-            background-color: #eee; border: 1px solid #ccc; border-radius: 4px;
-        }
+        .quantity-btn { font-size: 1em; padding: 3px 10px; margin: 0 5px; background-color: #eee; border: 1px solid #ccc; border-radius: 4px; }
         .item-quantity { font-size: 1.1em; margin: 0 5px; display: inline-block; width: 20px; text-align: center; }
         #cart-list li { margin-bottom: 5px; display: flex; align-items: center; }
         .item-details { flex-grow: 1; }
-
-        #message.ready {
-            color: #dc3545; font-size: 1.2em; padding: 15px;
-            border: 2px solid #dc3545; animation: flash 1s infinite;
-        }
+        #message.ready { color: #dc3545; font-size: 1.2em; padding: 15px; border: 2px solid #dc3545; animation: flash 1s infinite; }
         @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
 
-        /* ★★★ [NEW] レシート用のスタイル ★★★ */
-        #receipt {
-            border: 2px dashed #333;
-            background: #fafafa;
-            padding: 15px;
-            margin-top: 10px;
-        }
-        #receipt h2, #receipt h3 {
-            text-align: center;
-            margin: 10px 0;
-        }
-        #receipt ul {
-            list-style: none;
-            padding: 0;
-        }
-        #receipt li {
-            margin-bottom: 5px;
-            border-bottom: 1px dotted #ccc;
-            padding-bottom: 5px;
-        }
-        #receipt p {
-            font-size: 0.9em;
-        }
+        /* レシート用スタイル */
+        #receipt { border: 2px dashed #333; background: #fafafa; padding: 15px; margin-top: 10px; }
+        #receipt h2, #receipt h3 { text-align: center; margin: 10px 0; }
+        #receipt ul { list-style: none; padding: 0; }
+        #receipt li { margin-bottom: 5px; border-bottom: 1px dotted #ccc; padding-bottom: 5px; }
+        #receipt p { font-size: 0.9em; }
     </style>
 </head>
 <body>
     <h1>ご注文</h1>
-    <div class="menu">
+    <div class="menu" id="menu-area">
         <div class="menu-item">
-            <h3>牛串</h3><p>★乳成分を含みます。★</p><p class="price">500円</p>
-            <button class="add-to-cart" data-name="牛串（塩コショウ）" data-price="500">カートに入れる</button>
+            <h3>商品A</h3><p>説明文です。</p><p class="price">500円</p>
+            <button class="add-to-cart" data-name="商品A" data-price="500">カートに入れる</button>
+        </div>
+        <div class="menu-item">
+            <h3>商品B</h3><p>説明文です。</p><p class="price">800円</p>
+            <button class="add-to-cart" data-name="商品B" data-price="800">カートに入れる</button>
         </div>
     </div>
-    <h2>カート</h2>
+    
+    <h2 id="cart-title">カート</h2>
     <ul id="cart-list"></ul>
     <div id="total">合計金額: 0円</div>
     <button id="submit-order">この内容で注文する</button>
@@ -73,120 +53,135 @@
         const submitButton = document.getElementById('submit-order');
         const menuButtons = document.querySelectorAll('.add-to-cart');
         const messageDiv = document.getElementById('message');
-        const totalDiv = document.getElementById('total'); // totalDivも取得
+        const totalDiv = document.getElementById('total');
         
         // ★ VAPID公開鍵 (Renderの環境変数の値)
         const VAPID_PUBLIC_KEY = 'BAoAi-ufJ4-0DmT7deTIt7XciP2h2uaIT298QxdfBn3YCkM-11mpduc9hkyyHUEUwXqmd-F3it0__q-BDW0-kUk'; 
 
-        // MP3ファイルを準備
+        // MP3
         const customerCallSound = new Audio('/customer-call.mp3');
         customerCallSound.preload = 'auto';
         let audioUnlocked = false;
 
-        // MP3を再生する関数
         function playSound() { 
-            if (!audioUnlocked) { return; }
+            if (!audioUnlocked) return;
             customerCallSound.currentTime = 0;
-            customerCallSound.play().catch(e => console.error("音声の再生に失敗:", e));
+            customerCallSound.play().catch(e => console.error("音声再生失敗:", e));
         }
         
-        // 音声ロック解除
         function unlockAudio() {
             if (audioUnlocked) return;
             customerCallSound.muted = true;
             customerCallSound.play().then(() => {
-                customerCallSound.pause();
-                customerCallSound.currentTime = 0;
-                customerCallSound.muted = false;
+                customerCallSound.pause(); customerCallSound.currentTime = 0; customerCallSound.muted = false;
                 audioUnlocked = true;
-                console.log('音声ロック解除 成功');
-            }).catch(e => console.error('音声ロック解除 失敗:', e));
+            }).catch(e => console.error('音声ロック解除失敗:', e));
         }
 
-        // カートに入れる処理 (変更なし)
+        // ★★★ [NEW] ページ読み込み時に状態を復元 ★★★
+        document.addEventListener('DOMContentLoaded', async () => {
+            const savedOrderId = localStorage.getItem('myOrderId');
+            if (savedOrderId) {
+                // サーバーに最新状態を問い合わせ
+                try {
+                    const res = await fetch(`/api/order/${savedOrderId}`);
+                    if (res.ok) {
+                        const order = await res.json();
+                        // 自分の注文番号をサーバーに再登録（通知のため）
+                        socket.emit('register_customer', { orderId: order.id });
+                        
+                        if (order.status === '支払い待ち') {
+                            // まだ支払っていない -> 待機画面を復元
+                            lockScreenForPayment(order.id);
+                        } else {
+                            // 支払い済み -> レシートを表示
+                            showReceipt(order);
+                        }
+                    } else {
+                        // 注文が見つからない（サーバー再起動等で消えた）場合
+                        localStorage.removeItem('myOrderId');
+                    }
+                } catch(e) { console.error("状態確認エラー:", e); }
+            }
+        });
+
+        // カート操作
         menuButtons.forEach(button => {
             button.addEventListener('click', (e) => {
                 const itemName = e.target.getAttribute('data-name');
                 const itemPrice = parseInt(e.target.getAttribute('data-price'), 10); 
                 const existingItem = cart.find(item => item.name === itemName);
-                if (existingItem) { existingItem.quantity++; } 
-                else { cart.push({ name: itemName, price: itemPrice, quantity: 1 }); }
+                if (existingItem) { existingItem.quantity++; } else { cart.push({ name: itemName, price: itemPrice, quantity: 1 }); }
                 updateCartView();
             });
         });
 
-        // カート表示更新 (変更なし)
         function updateCartView() {
-            cartList.innerHTML = ''; 
-            let totalPrice = 0;
+            cartList.innerHTML = ''; let totalPrice = 0;
             cart.forEach((item, index) => {
                 const li = document.createElement('li');
-                li.innerHTML = `
-                    <span class="item-details">${item.name} - ${item.price}円</span>
-                    <button class="quantity-btn minus-btn" data-index="${index}">-</button>
-                    <span class="item-quantity">${item.quantity}</span>
-                    <button class="quantity-btn plus-btn" data-index="${index}">+</button>
-                `;
-                cartList.appendChild(li);
-                totalPrice += item.price * item.quantity;
+                li.innerHTML = `<span class="item-details">${item.name} - ${item.price}円</span> <button class="quantity-btn minus-btn" data-index="${index}">-</button> <span class="item-quantity">${item.quantity}</span> <button class="quantity-btn plus-btn" data-index="${index}">+</button>`;
+                cartList.appendChild(li); totalPrice += item.price * item.quantity;
             });
             totalDiv.textContent = `合計金額: ${totalPrice}円`;
         }
 
-        // 数量変更 (変更なし)
         cartList.addEventListener('click', (e) => {
-            const target = e.target;
-            if (!target.classList.contains('quantity-btn')) return;
-            const index = parseInt(target.getAttribute('data-index'), 10);
+            if (!e.target.classList.contains('quantity-btn')) return;
+            const index = parseInt(e.target.getAttribute('data-index'), 10);
             if (isNaN(index) || !cart[index]) return;
             const item = cart[index];
-            if (target.classList.contains('plus-btn')) { item.quantity++; } 
-            else if (target.classList.contains('minus-btn')) {
-                item.quantity--;
-                if (item.quantity <= 0) { cart.splice(index, 1); }
-            }
+            if (e.target.classList.contains('plus-btn')) { item.quantity++; } else { item.quantity--; if (item.quantity <= 0) cart.splice(index, 1); }
             updateCartView();
         });
 
-        // 「注文する」ボタンの処理 (変更なし)
+        // 注文ボタン
         submitButton.addEventListener('click', async () => {
             if (cart.length === 0) { alert('カートが空です。'); return; }
             messageDiv.textContent = '注文処理中...';
-            unlockAudio(); // 音声ロック解除
+            unlockAudio(); 
             try {
                 const response = await fetch('/api/order', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ items: cart }), 
                 });
                 const result = await response.json();
                 if (response.ok) {
-                    messageDiv.textContent = `注文番号: ${result.orderId}。レジでお支払いください。`;
+                    // ★ 注文IDを保存
+                    localStorage.setItem('myOrderId', result.orderId);
+                    
                     socket.emit('register_customer', { orderId: result.orderId });
-                    if ('serviceWorker' in navigator && 'PushManager' in window) {
-                        registerPush(result.orderId); 
-                    }
-                    cart = []; updateCartView(); submitButton.disabled = true; 
-                    cartList.innerHTML = 'お支払いのため、この画面をレジで提示してください。';
-                    menuButtons.forEach(btn => btn.disabled = true);
+                    if ('serviceWorker' in navigator && 'PushManager' in window) { registerPush(result.orderId); }
+                    
+                    lockScreenForPayment(result.orderId);
                 } else {
                     messageDiv.textContent = `エラー: ${result.message}`;
                 }
             } catch (error) {
                 messageDiv.textContent = '通信エラーが発生しました。';
-                console.error('注文エラー:', error);
             }
         });
 
-        // ★★★ [NEW] 支払い完了（デジタルレシート）を受信 ★★★
-        socket.on('payment_confirmed', (order) => {
-            console.log('支払い完了通知（レシート）を受信:', order);
-
-            // ロック画面の内容をクリア
-            cartList.innerHTML = ''; 
-            totalDiv.style.display = 'none'; // 「合計金額: 0円」を隠す
+        // ★★★ 画面ロック（支払い待ち）処理 ★★★
+        function lockScreenForPayment(orderId) {
+            cart = []; updateCartView(); 
+            submitButton.disabled = true; 
+            submitButton.style.display = 'none'; // ボタンを隠す
+            document.getElementById('menu-area').style.display = 'none'; // メニューも隠す
+            document.getElementById('cart-title').textContent = 'お支払い待ち';
             
-            // 合計金額を計算
+            cartList.innerHTML = `<li style="text-align:center; padding:20px; font-weight:bold;">注文番号: ${orderId}<br>レジでお支払いください。<br>(この画面を閉じても大丈夫です)</li>`;
+            messageDiv.textContent = `注文番号: ${orderId}。レジでお支払いください。`;
+        }
+
+        // ★★★ レシート表示処理 (共通関数) ★★★
+        function showReceipt(order) {
+            document.getElementById('menu-area').style.display = 'none';
+            submitButton.style.display = 'none';
+            document.getElementById('cart-title').textContent = '領収書';
+            cartList.innerHTML = ''; 
+            totalDiv.style.display = 'none'; 
+
             let totalPrice = 0;
             let itemsHtml = '<ul>';
             order.items.forEach(item => {
@@ -195,60 +190,56 @@
             });
             itemsHtml += '</ul>';
 
-            // レシート情報を作成
             const receiptDiv = document.createElement('div');
             receiptDiv.id = 'receipt';
             receiptDiv.innerHTML = `
                 <h2>領収書</h2>
                 <p><strong>ご注文番号: ${order.id}</strong></p>
                 <p>日時: ${new Date(order.createdAt).toLocaleString('ja-JP')}</p>
-                <hr>
-                ${itemsHtml}
-                <hr>
+                <hr>${itemsHtml}<hr>
                 <h3>合計金額: ${totalPrice} 円</h3>
                 <p>(お支払い: 現金)</p>
             `;
-            
-            // 画面にレシートを挿入
             cartList.appendChild(receiptDiv);
 
-            // メッセージも変更
-            messageDiv.textContent = 'お支払いが完了しました。商品ができるまでお待ちください。';
-            messageDiv.className = ''; // 点滅スタイルをリセット
+            if (order.status === '提供可能' || order.status === '提供済み') {
+                messageDiv.textContent = 'ご注文の準備ができました！カウンターまでお越しください。';
+                messageDiv.className = 'ready';
+            } else {
+                messageDiv.textContent = 'お支払いが完了しました。商品ができるまでお待ちください。';
+                messageDiv.className = '';
+            }
+        }
+
+        // リアルタイム通知: 支払い完了
+        socket.on('payment_confirmed', (order) => {
+            console.log('支払い完了通知を受信');
+            showReceipt(order);
         });
 
-        // 呼び出し受信 (変更なし)
+        // リアルタイム通知: 呼び出し
         socket.on('order_ready', () => {
-            console.log('呼び出し通知を受信！');
+            console.log('呼び出し通知を受信');
             playSound();
             setTimeout(() => { playSound(); }, 1200);
-            setTimeout(() => { playSound(); }, 2400);
             messageDiv.textContent = 'ご注文の準備ができました！カウンターまでお越しください。';
             messageDiv.className = 'ready'; 
             if (document.hidden) { navigator.vibrate([200, 100, 200]); }
         });
         
-        // registerPush 関数 (変更なし)
         async function registerPush(orderId) {
             try {
                 const registration = await navigator.serviceWorker.register('/service-worker.js');
                 const permission = await Notification.requestPermission();
-                if (permission !== 'granted') { return; }
+                if (permission !== 'granted') return;
                 const subscription = await registration.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: VAPID_PUBLIC_KEY 
+                    userVisibleOnly: true, applicationServerKey: VAPID_PUBLIC_KEY 
                 });
                 await fetch('/api/subscribe', {
-                    method: 'POST',
-                    body: JSON.stringify({ subscription: subscription, orderId: orderId }),
-                    headers: { 'Content-Type': 'application/json' }
+                    method: 'POST', body: JSON.stringify({ subscription, orderId }), headers: { 'Content-Type': 'application/json' }
                 });
             } catch (err) { console.error('プッシュ登録エラー:', err); }
         }
     </script>
 </body>
 </html>
-
-
-
-
