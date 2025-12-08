@@ -3,116 +3,78 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>厨房 管理画面</title>
+    <title>厨房</title>
     <style>
-        body { font-family: sans-serif; padding: 0 20px; display: flex; gap: 20px; }
-        .column { flex: 1; height: 95vh; overflow-y: auto; border: 1px solid #eee; padding: 10px; }
-        h1 { color: #333; margin-top: 0; }
+        body { font-family: sans-serif; padding: 20px; }
         .order-list { list-style: none; padding: 0; }
         .order-item { 
-            padding: 15px; margin-bottom: 15px; border-radius: 8px; border: 2px solid;
-            background: #f0f8ff; border-color: #007bff;
+            padding: 15px; margin-bottom: 15px; border-radius: 8px; border: 2px solid #007bff; background: #f0f8ff;
         }
-        .order-total { font-weight: bold; margin-top: 10px; font-size: 1.1em; }
-        .btn-kitchen { color: white; padding: 8px; border: none; cursor: pointer; margin-top: 5px; }
-        .btn-start-cooking { background-color: #007bff; } 
-        .btn-complete-cooking { background-color: #28a745; } 
-
+        .btn-kitchen { 
+            background-color: #28a745; color: white; padding: 10px 20px; 
+            border: none; cursor: pointer; font-size: 1.1em; border-radius: 5px;
+        }
         .order-item.new { animation: fadeIn 0.5s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
-    <div class="column">
-        <h1>オーダー</h1>
-        <ul id="order-list" class="order-list"></ul>
-    </div>
-    <div class="column">
-        <h1>調理中</h1>
-        <ul id="cooking-list" class="order-list"></ul>
-    </div>
+    <h1>厨房（調理オーダー）</h1>
+    <ul id="cooking-list" class="order-list"></ul>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io(); 
-        const orderList = document.getElementById('order-list');     
-        const cookingList = document.getElementById('cooking-list'); 
-        
-        // 注文リストアイテム作成 (変更なし)
-        function createOrderListItem(order) {
-            let li = document.getElementById(`order-kitchen-${order.id}`);
-            if (!li) { li = document.createElement('li'); li.id = `order-kitchen-${order.id}`; }
+        const cookingList = document.getElementById('cooking-list');
+
+        function createOrderItem(order) {
+            const li = document.createElement('li');
+            li.id = `kitchen-order-${order.id}`;
+            li.className = 'order-item new';
+            
             let itemsHtml = '<ul>';
-            let totalPrice = 0;
             order.items.forEach(item => {
-                itemsHtml += `<li>${item.name} - ${item.price}円 x ${item.quantity}</li>`;
-                totalPrice += item.price * item.quantity;
+                itemsHtml += `<li>${item.name} x ${item.quantity}</li>`;
             });
             itemsHtml += '</ul>';
-            let buttonHtml = '';
-            if (order.status === '受付済') {
-                buttonHtml = `<button class="btn-kitchen btn-start-cooking" onclick="startCooking(${order.id})">調理開始</button>`;
-            } else if (order.status === '調理中') {
-                buttonHtml = `<button class="btn-kitchen btn-complete-cooking" onclick="completeCooking(${order.id})">調理完了</button>`;
-            }
-            li.innerHTML = `<h3>注文番号: ${order.id}</h3>${itemsHtml}<div class="order-total">合計: ${totalPrice}円</div> ${buttonHtml}`;
+
+            li.innerHTML = `
+                <h3>注文番号: ${order.id}</h3>
+                ${itemsHtml}
+                <button class="btn-kitchen" onclick="finishCooking(${order.id})">準備完了 (呼出)</button>
+            `;
             return li;
         }
 
-        // ★★★ 注文を正しいリストに振り分け (ここを修正) ★★★
-        function sortOrder(order, isNew = false) {
-            if (order.status === '支払い待ち') return; 
-
-            const existingLi = document.getElementById(`order-kitchen-${order.id}`);
-            if (existingLi) existingLi.remove();
-
-            // ★ 「提供可能」または「提供済み」になったら厨房画面からは削除する
-            if (order.status === '提供可能' || order.status === '提供済み') {
-                 return;
-            }
-            
-            const li = createOrderListItem(order);
-            if (order.status === '受付済') {
-                li.className = 'order-item';
-                orderList.prepend(li);
-            } else if (order.status === '調理中') {
-                li.className = 'order-item';
-                cookingList.prepend(li);
-            }
-
-            if (isNew) {
-                li.classList.add('new');
-                setTimeout(() => li.classList.remove('new'), 500);
-            }
-        }
-
-        // --- Socket.IO イベント受信 ---
+        // --- Socket.IO ---
         socket.on('initial_orders', (orders) => {
-            orderList.innerHTML = ''; cookingList.innerHTML = '';
-            orders.reverse().forEach(order => sortOrder(order, false));
+            cookingList.innerHTML = '';
+            orders.forEach(order => {
+                if (order.status === '調理中') {
+                    cookingList.prepend(createOrderItem(order));
+                    // 初期表示時はアニメーションクラスを即削除
+                    document.getElementById(`kitchen-order-${order.id}`).classList.remove('new');
+                }
+            });
         });
 
-        socket.on('new_kitchen_order', (kitchenOrder) => {
-            console.log('新規オーダー受信:', kitchenOrder);
-            sortOrder(kitchenOrder, true); 
-        });
-        
-        socket.on('status_updated', (data) => {
-            console.log('ステータス更新受信:', data);
-            sortOrder(data, false); // ★ 「提供済み」ならここで削除される
-        });
-        
-        socket.on('order_is_ready', (data) => {
-            console.log('提供可能 受信（削除）:', data);
-            sortOrder(data, false); // ★ ここでも削除される
+        socket.on('new_kitchen_order', (order) => {
+            if (order.status === '調理中') {
+                cookingList.prepend(createOrderItem(order));
+            }
         });
 
-        // --- ボタン操作 --- (変更なし)
-        function startCooking(orderId) {
-            socket.emit('update_status', { id: orderId, status: '調理中' });
-        }
-        function completeCooking(orderId) {
-            socket.emit('cooking_complete', { id: orderId });
+        socket.on('status_updated', (order) => {
+            // ステータスが調理中以外になったらリストから消す
+            if (order.status !== '調理中') {
+                const li = document.getElementById(`kitchen-order-${order.id}`);
+                if (li) li.remove();
+            }
+        });
+
+        function finishCooking(id) {
+            if(!confirm('準備完了ですか？お客様を呼び出します。')) return;
+            socket.emit('cooking_complete', { id });
         }
     </script>
 </body>
