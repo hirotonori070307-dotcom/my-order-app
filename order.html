@@ -26,7 +26,7 @@
         #receipt li { margin-bottom: 5px; border-bottom: 1px dotted #ccc; padding-bottom: 5px; }
         #receipt p { font-size: 0.9em; }
         
-        /* ★★★ [NEW] 注文を続けるボタン ★★★ */
+        /* 注文を続けるボタン */
         #btn-new-order {
             display: block; width: 100%; margin-top: 20px;
             background-color: #007bff; color: white; border: none; padding: 15px;
@@ -38,8 +38,12 @@
     <h1>ご注文</h1>
     <div class="menu" id="menu-area">
         <div class="menu-item">
-            <h3>牛串</h3><p>★乳成分を含みます★味付けは塩コショウのみとなります。</p><p class="price">500円</p>
-            <button class="add-to-cart" data-name="牛串" data-price="500">カートに入れる</button>
+            <h3>商品A</h3><p>説明文です。</p><p class="price">500円</p>
+            <button class="add-to-cart" data-name="商品A" data-price="500">カートに入れる</button>
+        </div>
+        <div class="menu-item">
+            <h3>商品B</h3><p>説明文です。</p><p class="price">800円</p>
+            <button class="add-to-cart" data-name="商品B" data-price="800">カートに入れる</button>
         </div>
     </div>
     
@@ -93,7 +97,7 @@
                         if (order.status === '支払い待ち') {
                             lockScreenForPayment(order.id);
                         } else {
-                            showReceipt(order); // レシート表示（提供済みならボタンも出る）
+                            showReceipt(order); 
                         }
                     } else {
                         localStorage.removeItem('myOrderId');
@@ -165,7 +169,7 @@
             messageDiv.textContent = `注文番号: ${orderId}。レジでお支払いください。`;
         }
 
-        // ★★★ レシート表示 (注文を続けるボタンの制御) ★★★
+        // レシート表示
         function showReceipt(order) {
             document.getElementById('menu-area').style.display = 'none';
             submitButton.style.display = 'none';
@@ -193,7 +197,6 @@
             `;
             cartList.appendChild(receiptDiv);
 
-            // ステータスに応じたメッセージ
             if (order.status === '提供可能') {
                 messageDiv.textContent = 'ご注文の準備ができました！カウンターまでお越しください。';
                 messageDiv.className = 'ready';
@@ -201,7 +204,7 @@
                 messageDiv.textContent = 'ありがとうございました。またのご利用をお待ちしております。';
                 messageDiv.className = '';
                 
-                // ★ 「提供済み」なら「注文を続ける」ボタンを追加
+                // 新しい注文をするボタン
                 const newOrderBtn = document.createElement('button');
                 newOrderBtn.id = 'btn-new-order';
                 newOrderBtn.textContent = '新しい注文をする';
@@ -213,31 +216,38 @@
             }
         }
         
-        // ★★★ [NEW] 新しい注文のためにリセットする関数 ★★★
         function resetForNewOrder() {
             if(confirm('新しい注文画面に戻りますか？')) {
-                // 保存していた注文IDを削除
                 localStorage.removeItem('myOrderId');
-                // ページをリロードして初期状態に戻す
                 location.reload();
             }
         }
 
         // 通知受信
         socket.on('payment_confirmed', (order) => { showReceipt(order); });
+        
+        // ★ 従来の方法 (直接通知)
         socket.on('order_ready', () => {
-            playSound(); setTimeout(() => { playSound(); }, 1200);
+            console.log('呼び出し通知(Direct)を受信');
+            playSound();
+            setTimeout(() => { playSound(); }, 1200);
             messageDiv.textContent = 'ご注文の準備ができました！カウンターまでお越しください。';
             messageDiv.className = 'ready'; 
             if (document.hidden) { navigator.vibrate([200, 100, 200]); }
         });
         
-        // ★★★ [NEW] ステータス更新（提供済み）を受信 ★★★
+        // ★★★ [NEW] ステータス更新による音声再生 (バックアップ) ★★★
         socket.on('status_updated', (order) => {
-            // 現在表示中の注文と同じIDなら、画面を更新
             const myOrderId = localStorage.getItem('myOrderId');
             if (myOrderId && parseInt(myOrderId) === order.id) {
-                showReceipt(order); // ボタンが表示される
+                showReceipt(order); // 画面更新
+                
+                // ★ ステータスが「提供済み」になったら、ここでも音を鳴らす
+                if (order.status === '提供済み') {
+                    console.log('ステータス更新(提供済み)により音声を再生');
+                    playSound();
+                    setTimeout(() => { playSound(); }, 1200);
+                }
             }
         });
 
