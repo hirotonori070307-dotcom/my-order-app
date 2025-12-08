@@ -3,183 +3,87 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>レジ 管理画面</title>
+    <title>レジ</title>
     <style>
-        /* ★ 4列になるので gap/padding を調整 */
-        body { font-family: sans-serif; padding: 0 5px; display: flex; gap: 5px; }
-        .column { flex: 1; height: 95vh; overflow-y: auto; border: 1px solid #eee; padding: 5px; }
-        h1, h2 { color: #333; margin-top: 0; font-size: 1.5em; }
+        body { font-family: sans-serif; padding: 10px; display: flex; gap: 10px; }
+        .column { flex: 1; height: 95vh; overflow-y: auto; border: 1px solid #eee; padding: 10px; }
         .order-list { list-style: none; padding: 0; }
-        .order-item { 
-            padding: 15px; margin-bottom: 15px; border-radius: 8px; border: 2px solid;
-        }
-        .order-item.pending { border-color: #ffc107; background: #fffaf0; } /* 支払い待ち */
-        .order-item.preparing { border-color: #007bff; background: #f0f8ff; } /* 準備中 */
-        .order-item.ready { border-color: #28a745; background: #f0fff8; }    /* 提供可能 */
-        /* ★ [NEW] 提供済みスタイル */
-        .order-item.delivered { 
-            border-color: #6c757d; 
-            background: #f8f9fa; 
-            opacity: 0.7; /* 少し薄くする */
-        } 
-
-        .order-total { font-weight: bold; margin-top: 10px; font-size: 1.1em; }
-        .btn-confirm { background-color: #28a745; color: white; padding: 10px; border: none; font-size: 1.1em; cursor: pointer; }
-        .btn-call { background-color: #dc3545; color: white; padding: 10px; border: none; font-size: 1.1em; cursor: pointer; margin-top: 10px; }
+        .order-item { padding: 15px; margin-bottom: 15px; border-radius: 8px; border: 2px solid; }
         
-        #sales-report-btn { /* (変更なし) */ }
-        #sales-report { /* (変更なし) */ }
+        /* 支払い待ち（厨房から来たもの） */
+        .pending { border-color: #ffc107; background: #fffaf0; }
+        /* 提供済み */
+        .done { border-color: #6c757d; background: #f8f9fa; opacity: 0.8; }
+
+        .btn-pay { background-color: #007bff; color: white; padding: 10px; border: none; font-size: 1.1em; cursor: pointer; width: 100%; }
     </style>
 </head>
 <body>
     <div class="column">
-        <h1>支払い待ち</h1>
+        <h1>お会計待ち (呼び出し済み)</h1>
         <ul id="pending-list" class="order-list"></ul>
-        <hr style="margin: 30px 0;">
-        <h2>売上集計</h2>
-        <button id="sales-report-btn">今日の売上を集計</button>
-        <div id="sales-report"></div>
     </div>
-    
     <div class="column">
-        <h1>準備中</h1>
-        <ul id="preparing-list" class="order-list"></ul>
-    </div>
-    
-    <div class="column">
-        <h1>提供可能</h1>
-        <ul id="ready-list" class="order-list"></ul>
-    </div>
-    
-    <div class="column">
-        <h1>提供済み</h1>
-        <ul id="delivered-list" class="order-list"></ul>
+        <h1>提供済み履歴</h1>
+        <ul id="done-list" class="order-list"></ul>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io(); 
+        const socket = io();
         const pendingList = document.getElementById('pending-list');
-        const preparingList = document.getElementById('preparing-list');
-        const readyList = document.getElementById('ready-list');
-        const deliveredList = document.getElementById('delivered-list'); // ★ [NEW] 提供済みリスト
+        const doneList = document.getElementById('done-list');
 
-        // ★ レジ画面の注文アイテム作成 (呼び出しボタン/提供済み)
-        function createCashierOrderListItem(order) {
-            let li = document.getElementById(`order-cashier-${order.id}`);
-            if (!li) { li = document.createElement('li'); li.id = `order-cashier-${order.id}`; }
+        function createItem(order) {
+            const li = document.createElement('li');
+            li.id = `cashier-order-${order.id}`;
             
             let itemsHtml = '<ul>';
-            let totalPrice = 0;
-            order.items.forEach(item => {
-                itemsHtml += `<li>${item.name} (${item.price}円) x ${item.quantity}</li>`;
-                totalPrice += item.price * item.quantity;
+            let total = 0;
+            order.items.forEach(i => {
+                itemsHtml += `<li>${i.name} (${i.price}円) x ${i.quantity}</li>`;
+                total += i.price * i.quantity;
             });
             itemsHtml += '</ul>';
 
-            let buttonHtml = '';
-            if (order.status === '提供可能') {
-                 buttonHtml = `<button class="btn-call" id="btn-call-${order.id}" onclick="callCustomer(${order.id})">お客様呼び出し</button>`;
+            if (order.status === '支払い待ち') {
+                li.className = 'order-item pending';
+                li.innerHTML = `
+                    <h3>注文番号: ${order.id}</h3>
+                    ${itemsHtml}
+                    <div style="font-weight:bold; font-size:1.2em; margin:10px 0;">合計: ${total}円</div>
+                    <button class="btn-pay" onclick="confirmPay(${order.id})">支払い完了 & 提供</button>
+                `;
+            } else {
+                li.className = 'order-item done';
+                li.innerHTML = `<h3>注文番号: ${order.id} (済)</h3>${itemsHtml}<div>合計: ${total}円</div>`;
             }
-
-            li.innerHTML = `
-                <h3>注文番号: ${order.id} (ｽﾃｰﾀｽ: ${order.status})</h3>
-                ${itemsHtml}
-                <div class="order-total">合計: ${totalPrice}円</div> 
-                ${buttonHtml}
-            `;
             return li;
         }
 
-        // ★ レジ画面の注文振り分け (★ 提供済み を追加)
-        function sortOrderCashier(order) {
-            // 既存のliがあれば削除
-            const existingLi = document.getElementById(`order-cashier-${order.id}`);
-            if (existingLi) existingLi.remove();
-            
-            // 支払い待ちは左の列
-            if (order.status === '支払い待ち') {
-                const li = document.createElement('li');
-                li.id = `order-cashier-${order.id}`;
-                li.className = 'order-item pending';
-                let itemsHtml = '<ul>';
-                let totalPrice = 0;
-                order.items.forEach(item => { 
-                    itemsHtml += `<li>${item.name} (${item.price}円) x ${item.quantity}</li>`;
-                    totalPrice += item.price * item.quantity; 
-                });
-                itemsHtml += '</ul>';
-                li.innerHTML = `<h3>注文番号: ${order.id}</h3>${itemsHtml}<div class="order-total">合計: ${totalPrice}円</div> <button class="btn-confirm" onclick="confirmPayment(${order.id})">支払い完了</button>`;
-                pendingList.prepend(li);
-                return;
-            }
+        function renderOrder(order) {
+            // 既存削除
+            const old = document.getElementById(`cashier-order-${order.id}`);
+            if (old) old.remove();
 
-            // それ以外
-            const li = createCashierOrderListItem(order);
-            if (order.status === '提供可能') {
-                li.className = 'order-item ready';
-                readyList.prepend(li);
-            } else if (order.status === '受付済' || order.status === '調理中') {
-                li.className = 'order-item preparing';
-                preparingList.prepend(li);
-            } else if (order.status === '提供済み') { // ★ [NEW]
-                li.className = 'order-item delivered';
-                deliveredList.prepend(li); // 提供済みリストへ
-            }
+            // 調理中はレジに表示しない
+            if (order.status === '調理中') return;
+
+            const li = createItem(order);
+            if (order.status === '支払い待ち') pendingList.prepend(li);
+            else if (order.status === '提供済み') doneList.prepend(li);
         }
 
-        // --- Socket.IO イベント受信 ---
         socket.on('initial_orders', (orders) => {
-            pendingList.innerHTML = ''; preparingList.innerHTML = ''; readyList.innerHTML = '';
-            deliveredList.innerHTML = ''; // ★ [NEW] クリア
-            orders.reverse().forEach(order => sortOrderCashier(order));
+            orders.forEach(o => renderOrder(o));
         });
+        socket.on('new_pending_order', (order) => renderOrder(order));
+        socket.on('status_updated', (order) => renderOrder(order));
 
-        socket.on('new_pending_order', (newOrder) => {
-            sortOrderCashier(newOrder); // 支払い待ちリストに追加
-        });
-
-        socket.on('new_kitchen_order', (kitchenOrder) => {
-            sortOrderCashier(kitchenOrder); // 準備中リストに追加
-        });
-        
-        socket.on('status_updated', (data) => {
-             sortOrderCashier(data); // ステータス更新（調理中→準備中 / 呼び出し→提供済み）
-        });
-        
-        socket.on('order_is_ready', (data) => {
-             sortOrderCashier(data); // 準備中→提供可能リストへ移動
-        });
-
-        // --- ボタン操作 ---
-        function confirmPayment(orderId) { // (変更なし)
-            socket.emit('confirm_payment', { id: orderId });
+        function confirmPay(id) {
+            if(!confirm('支払いを完了し、提供済みにしますか？')) return;
+            socket.emit('confirm_payment', { id });
         }
-        
-        // ★ 呼び出しボタン (★ 変更: ボタン無効化を削除)
-        function callCustomer(orderId) { 
-            socket.emit('call_customer', { id: orderId });
-            // ボタンの無効化処理は不要（status_updatedで自動的にリスト移動するため）
-        }
-        
-        // 売上集計 (変更なし)
-        const reportBtn = document.getElementById('sales-report-btn');
-        const reportDiv = document.getElementById('sales-report');
-        reportBtn.addEventListener('click', async () => {
-            reportDiv.textContent = '集計中...';
-            try {
-                const response = await fetch('/api/sales/today');
-                if (!response.ok) { throw new Error('集計失敗'); }
-                const salesData = await response.json(); 
-                reportDiv.innerHTML = `
-                    <strong>${salesData.date} の売上</strong><br>
-                    売上点数: <strong>${salesData.totalItems} 点</strong><br>
-                    売上金額: <strong>${salesData.totalRevenue} 円</strong>
-                `;
-            } catch (error) {
-                reportDiv.textContent = `エラー: ${error.message}`;
-            }
-        });
     </script>
 </body>
 </html>
