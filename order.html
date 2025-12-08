@@ -25,13 +25,20 @@
         #receipt ul { list-style: none; padding: 0; }
         #receipt li { margin-bottom: 5px; border-bottom: 1px dotted #ccc; padding-bottom: 5px; }
         #receipt p { font-size: 0.9em; }
+        
+        /* ★★★ [NEW] 注文を続けるボタン ★★★ */
+        #btn-new-order {
+            display: block; width: 100%; margin-top: 20px;
+            background-color: #007bff; color: white; border: none; padding: 15px;
+            font-size: 1.2em; border-radius: 5px;
+        }
     </style>
 </head>
 <body>
     <h1>ご注文</h1>
     <div class="menu" id="menu-area">
         <div class="menu-item">
-            <h3>牛串</h3><p>★乳成分を含みます。★</p><p class="price">500円</p>
+            <h3>牛串</h3><p>★乳成分を含みます★味付けは塩コショウのみとなります。</p><p class="price">500円</p>
             <button class="add-to-cart" data-name="牛串" data-price="500">カートに入れる</button>
         </div>
     </div>
@@ -74,27 +81,21 @@
             }).catch(e => console.error('音声ロック解除失敗:', e));
         }
 
-        // ★★★ [NEW] ページ読み込み時に状態を復元 ★★★
+        // ページ読み込み時に状態を復元
         document.addEventListener('DOMContentLoaded', async () => {
             const savedOrderId = localStorage.getItem('myOrderId');
             if (savedOrderId) {
-                // サーバーに最新状態を問い合わせ
                 try {
                     const res = await fetch(`/api/order/${savedOrderId}`);
                     if (res.ok) {
                         const order = await res.json();
-                        // 自分の注文番号をサーバーに再登録（通知のため）
                         socket.emit('register_customer', { orderId: order.id });
-                        
                         if (order.status === '支払い待ち') {
-                            // まだ支払っていない -> 待機画面を復元
                             lockScreenForPayment(order.id);
                         } else {
-                            // 支払い済み -> レシートを表示
-                            showReceipt(order);
+                            showReceipt(order); // レシート表示（提供済みならボタンも出る）
                         }
                     } else {
-                        // 注文が見つからない（サーバー再起動等で消えた）場合
                         localStorage.removeItem('myOrderId');
                     }
                 } catch(e) { console.error("状態確認エラー:", e); }
@@ -143,12 +144,9 @@
                 });
                 const result = await response.json();
                 if (response.ok) {
-                    // ★ 注文IDを保存
                     localStorage.setItem('myOrderId', result.orderId);
-                    
                     socket.emit('register_customer', { orderId: result.orderId });
                     if ('serviceWorker' in navigator && 'PushManager' in window) { registerPush(result.orderId); }
-                    
                     lockScreenForPayment(result.orderId);
                 } else {
                     messageDiv.textContent = `エラー: ${result.message}`;
@@ -158,19 +156,16 @@
             }
         });
 
-        // ★★★ 画面ロック（支払い待ち）処理 ★★★
         function lockScreenForPayment(orderId) {
             cart = []; updateCartView(); 
-            submitButton.disabled = true; 
-            submitButton.style.display = 'none'; // ボタンを隠す
-            document.getElementById('menu-area').style.display = 'none'; // メニューも隠す
+            submitButton.disabled = true; submitButton.style.display = 'none'; 
+            document.getElementById('menu-area').style.display = 'none'; 
             document.getElementById('cart-title').textContent = 'お支払い待ち';
-            
             cartList.innerHTML = `<li style="text-align:center; padding:20px; font-weight:bold;">注文番号: ${orderId}<br>レジでお支払いください。<br>(この画面を閉じても大丈夫です)</li>`;
             messageDiv.textContent = `注文番号: ${orderId}。レジでお支払いください。`;
         }
 
-        // ★★★ レシート表示処理 (共通関数) ★★★
+        // ★★★ レシート表示 (注文を続けるボタンの制御) ★★★
         function showReceipt(order) {
             document.getElementById('menu-area').style.display = 'none';
             submitButton.style.display = 'none';
@@ -198,31 +193,54 @@
             `;
             cartList.appendChild(receiptDiv);
 
-            if (order.status === '提供可能' || order.status === '提供済み') {
+            // ステータスに応じたメッセージ
+            if (order.status === '提供可能') {
                 messageDiv.textContent = 'ご注文の準備ができました！カウンターまでお越しください。';
                 messageDiv.className = 'ready';
+            } else if (order.status === '提供済み') {
+                messageDiv.textContent = 'ありがとうございました。またのご利用をお待ちしております。';
+                messageDiv.className = '';
+                
+                // ★ 「提供済み」なら「注文を続ける」ボタンを追加
+                const newOrderBtn = document.createElement('button');
+                newOrderBtn.id = 'btn-new-order';
+                newOrderBtn.textContent = '新しい注文をする';
+                newOrderBtn.onclick = resetForNewOrder;
+                cartList.appendChild(newOrderBtn);
             } else {
                 messageDiv.textContent = 'お支払いが完了しました。商品ができるまでお待ちください。';
                 messageDiv.className = '';
             }
         }
+        
+        // ★★★ [NEW] 新しい注文のためにリセットする関数 ★★★
+        function resetForNewOrder() {
+            if(confirm('新しい注文画面に戻りますか？')) {
+                // 保存していた注文IDを削除
+                localStorage.removeItem('myOrderId');
+                // ページをリロードして初期状態に戻す
+                location.reload();
+            }
+        }
 
-        // リアルタイム通知: 支払い完了
-        socket.on('payment_confirmed', (order) => {
-            console.log('支払い完了通知を受信');
-            showReceipt(order);
-        });
-
-        // リアルタイム通知: 呼び出し
+        // 通知受信
+        socket.on('payment_confirmed', (order) => { showReceipt(order); });
         socket.on('order_ready', () => {
-            console.log('呼び出し通知を受信');
-            playSound();
-            setTimeout(() => { playSound(); }, 1200);
+            playSound(); setTimeout(() => { playSound(); }, 1200);
             messageDiv.textContent = 'ご注文の準備ができました！カウンターまでお越しください。';
             messageDiv.className = 'ready'; 
             if (document.hidden) { navigator.vibrate([200, 100, 200]); }
         });
         
+        // ★★★ [NEW] ステータス更新（提供済み）を受信 ★★★
+        socket.on('status_updated', (order) => {
+            // 現在表示中の注文と同じIDなら、画面を更新
+            const myOrderId = localStorage.getItem('myOrderId');
+            if (myOrderId && parseInt(myOrderId) === order.id) {
+                showReceipt(order); // ボタンが表示される
+            }
+        });
+
         async function registerPush(orderId) {
             try {
                 const registration = await navigator.serviceWorker.register('/service-worker.js');
@@ -239,5 +257,3 @@
     </script>
 </body>
 </html>
-
-
