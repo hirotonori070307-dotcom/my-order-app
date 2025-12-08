@@ -35,7 +35,6 @@ app.get('/cashier', (req, res) => { res.sendFile(path.join(__dirname, 'cashier.h
 app.get('/kitchen', (req, res) => { res.sendFile(path.join(__dirname, 'kitchen.html')); });
 
 // --- API ---
-// [POST] /api/order
 app.post('/api/order', (req, res) => {
   const items = req.body.items;
   if (!items || items.length === 0) { return res.status(400).json({ message: '注文内容が空です。' }); }
@@ -45,18 +44,12 @@ app.post('/api/order', (req, res) => {
   res.status(201).json({ message: '注文を受け付けました。レジでお支払いください。', orderId: newOrder.id });
 });
 
-// ★★★ [NEW] 注文状態確認API (レシート再表示用) ★★★
 app.get('/api/order/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
   const order = orders.find(o => o.id === id);
-  if (order) {
-    res.json(order);
-  } else {
-    res.status(404).json({ message: '注文が見つかりません' });
-  }
+  if (order) { res.json(order); } else { res.status(404).json({ message: '注文が見つかりません' }); }
 });
 
-// [GET] /api/sales/today
 app.get('/api/sales/today', (req, res) => {
     let totalRevenue = 0, totalItems = 0;
     const today = new Date();
@@ -72,7 +65,6 @@ app.get('/api/sales/today', (req, res) => {
     res.json({ totalRevenue, totalItems, date: todayString });
 });
 
-// [POST] /api/subscribe
 app.post('/api/subscribe', (req, res) => {
   const { subscription, orderId } = req.body;
   if (!subscription || !orderId) { return res.status(400).json({ error: '購読情報または注文IDがありません。' }); }
@@ -80,59 +72,49 @@ app.post('/api/subscribe', (req, res) => {
   res.status(201).json({ message: '購読成功' });
 });
 
-// --- リアルタイム通信 (Socket.IO) ---
+// --- Socket.IO ---
 io.on('connection', (socket) => {
   console.log('クライアント接続:', socket.id);
   socket.emit('initial_orders', orders);
 
-  // レジからの「支払い完了」
   socket.on('confirm_payment', ({ id }) => {
     const order = orders.find(o => o.id === id);
     if (order && order.status === '支払い待ち') {
       order.status = '受付済';
       io.emit('new_kitchen_order', order); 
-      
-      // ★ 特定のお客様に「支払い完了」通知
       const targetSocketId = customerSockets[id];
-      if (targetSocketId) {
-        io.to(targetSocketId).emit('payment_confirmed', order);
-      }
+      if (targetSocketId) { io.to(targetSocketId).emit('payment_confirmed', order); }
     }
   });
   
-  // 厨房からの「ステータス更新」
   socket.on('update_status', ({ id, status }) => {
     const order = orders.find(o => o.id === id);
-    if (order && order.status !== '提供可能') { 
+    if (order && order.status !== '提供可能' && order.status !== '提供済み') { 
       order.status = status;
-      console.log(`ステータス更新: ${id} -> ${status}`);
       io.emit('status_updated', order);
     }
   });
 
-  // 厨房からの「調理完了」
   socket.on('cooking_complete', ({ id }) => {
     const order = orders.find(o => o.id === id);
     if (order && order.status === '調理中') {
       order.status = '提供可能';
-      console.log(`調理完了: ${id}`);
       io.emit('order_is_ready', order);
     }
   });
 
-  // お客様画面からの「注文番号登録」
   socket.on('register_customer', ({ orderId }) => {
     if (orderId) customerSockets[orderId] = socket.id;
   });
 
-  // レジ画面からの「呼び出し」
   socket.on('call_customer', ({ id }) => {
     console.log(`レジから呼び出し: 注文番号 ${id}`);
     const order = orders.find(o => o.id === id);
     
+    // ★ ステータスを「提供済み」に変更
     if (order && order.status === '提供可能') {
         order.status = '提供済み';
-        console.log(`ステータス更新: ${id} -> 提供済み`);
+        // ★ ここで更新を通知することが重要
         io.emit('status_updated', order); 
     }
 
@@ -148,12 +130,10 @@ io.on('connection', (socket) => {
     }
   });
   
-  // 切断処理
   socket.on('disconnect', () => {
     for (const orderId in customerSockets) { if (customerSockets[orderId] === socket.id) delete customerSockets[orderId]; }
   });
 });
 
-// --- サーバー起動 ---
 const PORT = process.env.PORT || 3000; 
 server.listen(PORT, () => console.log(`サーバー起動: http://localhost:${PORT}`));
