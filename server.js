@@ -33,14 +33,10 @@ app.get('/kitchen', (req, res) => { res.sendFile(path.join(__dirname, 'kitchen.h
 app.post('/api/order', (req, res) => {
   const items = req.body.items;
   if (!items || items.length === 0) { return res.status(400).json({ message: '空です' }); }
-  
-  // ★ 初期ステータスを「調理中」に変更（レジにはまだ表示しない）
   const newOrder = { id: orderCounter++, items: items, status: '調理中', createdAt: new Date() };
   orders.push(newOrder);
-  
-  // 厨房に通知
   io.emit('new_kitchen_order', newOrder); 
-  res.status(201).json({ message: '注文を受け付けました。', orderId: newOrder.id });
+  res.status(201).json({ message: 'OK', orderId: newOrder.id });
 });
 
 app.get('/api/order/:id', (req, res) => {
@@ -49,12 +45,18 @@ app.get('/api/order/:id', (req, res) => {
   if (order) res.json(order); else res.status(404).json({ message: 'なし' });
 });
 
+// ★★★ 集計API (ここを修正) ★★★
 app.get('/api/sales/today', (req, res) => {
     let totalRevenue = 0, totalItems = 0;
-    const today = new Date().toISOString().split('T')[0];
+    // 今日の日付 (YYYY-MM-DD)
+    const today = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' }).replaceAll('/', '-');
+    
     orders.forEach(order => {
-        // 提供済み（支払い済み）のみ集計
-        if (order.status === '提供済み' && order.createdAt.toISOString().split('T')[0] === today) {
+        // 注文日
+        const orderDate = new Date(order.createdAt).toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' }).replaceAll('/', '-');
+
+        // ★「提供済み」かつ「今日」の注文のみ集計
+        if (order.status === '提供済み' && orderDate === today) {
             order.items.forEach(item => {
                 totalRevenue += item.price * item.quantity;
                 totalItems += item.quantity;
@@ -74,35 +76,23 @@ app.post('/api/subscribe', (req, res) => {
 io.on('connection', (socket) => {
   socket.emit('initial_orders', orders);
 
-  // ★ 厨房からの「準備完了」
-  // -> レジに表示(支払い待ち) ＆ お客さんに通知
+  // 厨房「準備完了」
   socket.on('cooking_complete', ({ id }) => {
     const order = orders.find(o => o.id === id);
     if (order && order.status === '調理中') {
       order.status = '支払い待ち'; 
-      console.log(`準備完了(支払い待ちへ): ${id}`);
-      
-      // 全画面へ更新通知（レジに表示されるようになる）
       io.emit('status_updated', order);
-      // レジ画面に「新規支払い待ち」として通知
       io.emit('new_pending_order', order);
-
-      // ★ お客さんへ呼び出し通知
       notifyCustomer(id);
     }
   });
 
-  // ★ レジからの「支払い完了」
-  // -> 提供済みへ ＆ レシート表示
+  // レジ「支払い完了」
   socket.on('confirm_payment', ({ id }) => {
     const order = orders.find(o => o.id === id);
     if (order && order.status === '支払い待ち') {
       order.status = '提供済み';
-      console.log(`支払い完了(提供済みへ): ${id}`);
-      
       io.emit('status_updated', order);
-      
-      // お客さんへレシート通知
       const targetSocketId = customerSockets[id];
       if (targetSocketId) io.to(targetSocketId).emit('payment_confirmed', order);
     }
@@ -116,7 +106,6 @@ io.on('connection', (socket) => {
     for (const oid in customerSockets) { if (customerSockets[oid] === socket.id) delete customerSockets[oid]; }
   });
 
-  // お客様への通知処理（共通化）
   function notifyCustomer(orderId) {
     const targetSocketId = customerSockets[orderId];
     if (targetSocketId) io.to(targetSocketId).emit('order_ready');
@@ -124,8 +113,7 @@ io.on('connection', (socket) => {
     const subscription = subscriptions[orderId];
     if (subscription) {
       const payload = JSON.stringify({ title: '出来上がりました！', body: `注文番号: ${orderId} 番のお客様、レジまでお越しください。` });
-      webpush.sendNotification(subscription, payload)
-        .catch(err => { if (err.statusCode === 410 || err.statusCode === 404) delete subscriptions[orderId]; });
+      webpush.sendNotification(subscription, payload).catch(e => {});
     }
   }
 });
