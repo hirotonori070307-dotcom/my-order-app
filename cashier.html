@@ -10,12 +10,36 @@
         .order-list { list-style: none; padding: 0; }
         .order-item { padding: 15px; margin-bottom: 15px; border-radius: 8px; border: 2px solid; }
         
-        /* 支払い待ち（厨房から来たもの） */
+        /* 支払い待ち */
         .pending { border-color: #ffc107; background: #fffaf0; }
         /* 提供済み */
         .done { border-color: #6c757d; background: #f8f9fa; opacity: 0.8; }
 
         .btn-pay { background-color: #007bff; color: white; padding: 10px; border: none; font-size: 1.1em; cursor: pointer; width: 100%; }
+
+        /* ★★★ 集計エリアのスタイル ★★★ */
+        .sales-area {
+            background-color: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .btn-sales {
+            background-color: #17a2b8;
+            color: white;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+        }
+        #sales-result {
+            margin-top: 10px;
+            font-weight: bold;
+            font-size: 1.1em;
+            color: #333;
+        }
     </style>
 </head>
 <body>
@@ -23,8 +47,16 @@
         <h1>お会計待ち (呼び出し済み)</h1>
         <ul id="pending-list" class="order-list"></ul>
     </div>
+
     <div class="column">
-        <h1>提供済み履歴</h1>
+        <h1>提供済み履歴・集計</h1>
+
+        <div class="sales-area">
+            <button class="btn-sales" onclick="fetchSales()">本日の売上を集計する</button>
+            <div id="sales-result">ここに集計結果が表示されます</div>
+        </div>
+        <hr>
+        
         <ul id="done-list" class="order-list"></ul>
     </div>
 
@@ -33,7 +65,30 @@
         const socket = io();
         const pendingList = document.getElementById('pending-list');
         const doneList = document.getElementById('done-list');
+        const salesResult = document.getElementById('sales-result');
 
+        // ★★★ 売上集計を取得する関数 ★★★
+        async function fetchSales() {
+            salesResult.textContent = '集計中...';
+            try {
+                const res = await fetch('/api/sales/today');
+                if (res.ok) {
+                    const data = await res.json();
+                    salesResult.innerHTML = `
+                        日付: ${data.date}<br>
+                        販売数: ${data.totalItems} 点<br>
+                        <span style="color:#d9534f; font-size:1.3em;">売上: ${data.totalRevenue} 円</span>
+                    `;
+                } else {
+                    salesResult.textContent = '集計に失敗しました';
+                }
+            } catch (e) {
+                console.error(e);
+                salesResult.textContent = '通信エラー';
+            }
+        }
+
+        // 注文リストの描画
         function createItem(order) {
             const li = document.createElement('li');
             li.id = `cashier-order-${order.id}`;
@@ -62,11 +117,9 @@
         }
 
         function renderOrder(order) {
-            // 既存削除
             const old = document.getElementById(`cashier-order-${order.id}`);
             if (old) old.remove();
 
-            // 調理中はレジに表示しない
             if (order.status === '調理中') return;
 
             const li = createItem(order);
