@@ -6,34 +6,67 @@
     <title>注文画面</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
-        body { font-family: sans-serif; padding: 20px; }
+        body { font-family: sans-serif; padding: 20px; padding-bottom: 80px; }
         .menu-item { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
         .price { font-weight: bold; color: #d9534f; }
         button { padding: 10px; cursor: pointer; font-size: 1.1em; }
+        
+        /* ステータス表示エリア */
         #message { margin-top: 20px; padding: 15px; font-weight: bold; text-align: center; display: none; }
-        
-        /* 状態ごとのスタイル */
         .msg-cooking { background: #e2e3e5; color: #383d41; border: 2px solid #d6d8db; }
-        .msg-ready { background: #f8d7da; color: #721c24; border: 2px solid #f5c6cb; animation: flash 1s infinite; }
-        @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
         
+        /* ★ 強力な呼び出し画面（モーダル） */
+        #alarm-modal {
+            display: none; /* 最初は隠す */
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(255, 0, 0, 0.9); /* 赤背景 */
+            color: white; z-index: 9999;
+            flex-direction: column; justify-content: center; align-items: center;
+            text-align: center;
+        }
+        #alarm-modal h1 { font-size: 3em; margin-bottom: 20px; animation: shake 0.5s infinite; }
+        #stop-alarm-btn {
+            font-size: 1.5em; padding: 20px 40px; background: white; color: red;
+            border: none; border-radius: 50px; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        @keyframes shake {
+            0% { transform: translate(1px, 1px) rotate(0deg); }
+            10% { transform: translate(-1px, -2px) rotate(-1deg); }
+            20% { transform: translate(-3px, 0px) rotate(1deg); }
+            30% { transform: translate(3px, 2px) rotate(0deg); }
+            40% { transform: translate(1px, -1px) rotate(1deg); }
+            50% { transform: translate(-1px, 2px) rotate(-1deg); }
+            60% { transform: translate(-3px, 1px) rotate(0deg); }
+            70% { transform: translate(3px, 1px) rotate(-1deg); }
+            80% { transform: translate(-1px, -1px) rotate(1deg); }
+            90% { transform: translate(1px, 2px) rotate(0deg); }
+            100% { transform: translate(1px, -2px) rotate(-1deg); }
+        }
+
         #receipt { border: 2px dashed #333; background: #fafafa; padding: 15px; margin-top: 20px; }
         #btn-new-order { width: 100%; background: #007bff; color: white; border: none; margin-top: 20px; }
-        
-        /* カート数量ボタン */
         .quantity-btn { padding: 5px 10px; margin: 0 5px; }
     </style>
 </head>
 <body>
+    <div id="alarm-modal">
+        <h1>出来上がり！</h1>
+        <p>注文番号の呼び出しです。<br>カウンターへお越しください。</p>
+        <button id="stop-alarm-btn" onclick="stopAlarm()">音を止めて確認する</button>
+    </div>
+
     <div id="main-view">
         <h1>ご注文</h1>
         <div id="menu-area">
             <div class="menu-item">
-                <h3>牛串★乳成分を含みます★</h3><p class="price">500円</p>
-                <button class="add-to-cart" data-name="牛串" data-price="500">カートに入れる</button>
+                <h3>商品A</h3><p class="price">500円</p>
+                <button class="add-to-cart" data-name="商品A" data-price="500">カートに入れる</button>
+            </div>
+            <div class="menu-item">
+                <h3>商品B</h3><p class="price">800円</p>
+                <button class="add-to-cart" data-name="商品B" data-price="800">カートに入れる</button>
             </div>
         </div>
-
         <h2>カート</h2>
         <ul id="cart-list"></ul>
         <div id="total">合計: 0円</div>
@@ -50,12 +83,49 @@
         let cart = [];
         const customerCallSound = new Audio('/customer-call.mp3');
         let audioUnlocked = false;
+        let alarmInterval = null; // アラーム繰り返し用
 
-        function playSound() { 
+        // ★ 音声再生＆バイブレーション
+        function playSound() {
             if (audioUnlocked) { 
                 customerCallSound.currentTime = 0; 
-                customerCallSound.play().catch(e=>console.log(e)); 
+                customerCallSound.play().catch(e => console.log('再生エラー:', e));
+                
+                // スマホを振動させる (対応機種のみ)
+                if (navigator.vibrate) {
+                    navigator.vibrate([500, 200, 500, 200, 500]);
+                }
             }
+        }
+
+        // ★ 強力なアラーム開始機能
+        function startAlarm() {
+            const modal = document.getElementById('alarm-modal');
+            modal.style.display = 'flex'; // 全画面表示
+            
+            // すぐに鳴らす
+            playSound();
+
+            // 既にアラーム中なら重複させない
+            if (alarmInterval) clearInterval(alarmInterval);
+
+            // 3秒ごとに繰り返し鳴らす (気づくまで終わらない)
+            alarmInterval = setInterval(() => {
+                playSound();
+            }, 3000);
+        }
+
+        // ★ アラーム停止機能
+        function stopAlarm() {
+            const modal = document.getElementById('alarm-modal');
+            modal.style.display = 'none'; // 画面を隠す
+            
+            if (alarmInterval) {
+                clearInterval(alarmInterval); // ループ停止
+                alarmInterval = null;
+            }
+            customerCallSound.pause(); // 音も止める
+            customerCallSound.currentTime = 0;
         }
 
         // 初期化
@@ -73,13 +143,11 @@
             }
         });
 
-        // 画面切り替えロジック
         function updateScreen(order) {
             const mainView = document.getElementById('main-view');
             const msgDiv = document.getElementById('message');
             const receiptArea = document.getElementById('receipt-area');
 
-            // 共通: 注文済みならメイン画面（メニュー）を隠す
             mainView.style.display = 'none';
             msgDiv.style.display = 'block';
 
@@ -89,14 +157,19 @@
                 receiptArea.innerHTML = '';
             
             } else if (order.status === '支払い待ち') {
-                // ★ 厨房で準備完了 -> 呼び出し中
-                msgDiv.className = 'msg-ready';
-                msgDiv.innerHTML = `注文番号: <strong>${order.id}</strong><br>出来上がりました！<br>レジまでお越しください。`;
-                receiptArea.innerHTML = '';
-            
+                // 呼び出し中
+                msgDiv.style.display = 'none'; // メッセージではなくアラーム画面を出すため
+                receiptArea.innerHTML = `
+                    <div style="text-align:center; padding:20px; font-weight:bold; font-size:1.5em; color:red;">
+                        呼び出し中！<br>レジへお越しください。
+                    </div>`;
+                
+                // ★ ここでアラーム発動
+                startAlarm();
+
             } else if (order.status === '提供済み') {
-                // ★ 支払い完了 -> レシート
-                msgDiv.style.display = 'none'; // メッセージ消す
+                stopAlarm(); // 念のため止める
+                msgDiv.style.display = 'none';
                 showReceipt(order);
             }
         }
@@ -128,16 +201,19 @@
             }
         }
 
-        // 注文処理
         document.getElementById('submit-order').addEventListener('click', async () => {
             if(cart.length===0) return alert('カートが空です');
             
-            // 音声ロック解除
+            // ★ ここで音声を「強制ロック解除」する (無音で一瞬再生)
             if(!audioUnlocked) {
-                customerCallSound.muted = true;
+                customerCallSound.muted = true; // 一旦ミュート
                 customerCallSound.play().then(()=>{ 
-                    customerCallSound.pause(); customerCallSound.muted=false; audioUnlocked=true; 
-                }).catch(e=>console.log(e));
+                    customerCallSound.pause(); 
+                    customerCallSound.currentTime = 0;
+                    customerCallSound.muted = false; // ミュート解除
+                    audioUnlocked = true; 
+                    console.log("音声ロック解除成功");
+                }).catch(e=>console.log("ロック解除失敗", e));
             }
 
             const res = await fetch('/api/order', {
@@ -150,34 +226,27 @@
                 localStorage.setItem('myOrderId', data.orderId);
                 socket.emit('register_customer', { orderId: data.orderId });
                 if ('serviceWorker' in navigator) registerPush(data.orderId);
-                
-                // 即座に調理中画面へ
                 updateScreen({ id: data.orderId, status: '調理中', items: cart });
             }
         });
 
-        // Socketイベント
+        // 呼び出しイベント (バックアップ用)
         socket.on('order_ready', () => {
-            // 呼び出し（支払い待ちになった）
-            playSound();
-            const oid = localStorage.getItem('myOrderId');
-            if(oid) updateScreen({ id: oid, status: '支払い待ち' }); // 簡易更新
+            startAlarm(); // 即アラーム開始
         });
 
         socket.on('payment_confirmed', (order) => {
-            updateScreen(order); // レシート表示
+            updateScreen(order);
         });
 
-        // 状態同期用
         socket.on('status_updated', (order) => {
             const oid = localStorage.getItem('myOrderId');
             if(oid && parseInt(oid) === order.id) {
                 updateScreen(order);
-                if(order.status === '支払い待ち') playSound();
             }
         });
 
-        // カート機能 (省略せず記述)
+        // カート機能
         const cartList = document.getElementById('cart-list');
         const totalDiv = document.getElementById('total');
         document.querySelectorAll('.add-to-cart').forEach(btn => {
@@ -215,4 +284,3 @@
     </script>
 </body>
 </html>
-
