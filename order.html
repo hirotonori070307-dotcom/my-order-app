@@ -64,155 +64,82 @@
     <div id="receipt-area"></div>
 
     <script>
+        // 基本設定
         const socket = io();
         const VAPID_PUBLIC_KEY = 'BAoAi-ufJ4-0DmT7deTIt7XciP2h2uaIT298QxdfBn3YCkM-11mpduc9hkyyHUEUwXqmd-F3it0__q-BDW0-kUk'; 
-        
         let cart = [];
+
+        // HTML要素の取得
+        const cartList = document.getElementById('cart-list');
+        const totalDiv = document.getElementById('total');
+
+        // ★★★★★ カート機能を最優先で読み込む (ここを一番上に移動) ★★★★★
+        document.querySelectorAll('.add-to-cart').forEach(btn => {
+            btn.addEventListener('click', e => {
+                const name = e.target.getAttribute('data-name');
+                const price = parseInt(e.target.getAttribute('data-price'));
+                
+                // カートに追加
+                const exist = cart.find(i => i.name === name);
+                if(exist) {
+                    exist.quantity++;
+                } else {
+                    cart.push({name: name, price: price, quantity: 1});
+                }
+                renderCart();
+            });
+        });
+
+        // カート描画関数
+        function renderCart() {
+            cartList.innerHTML = '';
+            let t = 0;
+            cart.forEach((i, idx) => {
+                const li = document.createElement('li');
+                li.innerHTML = `${i.name} - ${i.price}円 x ${i.quantity} 
+                    <button class="quantity-btn" onclick="modQ(${idx},1)">+</button>
+                    <button class="quantity-btn" onclick="modQ(${idx},-1)">-</button>`;
+                cartList.appendChild(li);
+                t += i.price * i.quantity;
+            });
+            totalDiv.innerText = `合計: ${t}円`;
+        }
+
+        // 数量変更 (+/- ボタン)
+        window.modQ = (idx, d) => {
+            if (cart[idx]) {
+                cart[idx].quantity += d;
+                if(cart[idx].quantity <= 0) cart.splice(idx, 1);
+                renderCart();
+            }
+        };
+        // ★★★★★ カート機能 ここまで ★★★★★
+
+
+        // --- 音声・アラーム機能 ---
         let alarmInterval = null;
         let audioCtx = null;
 
-        // ★★★ 1. オーディオエンジンの準備 ★★★
         function initAudio() {
             if (!audioCtx) {
-                // ブラウザ互換性のため webkitAudioContext も考慮
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
-                audioCtx = new AudioContext();
-            }
-        }
-
-        // ★★★ 2. 実際に音を鳴らす関数 (ピピピ！) ★★★
-        function playBeep() {
-            if (!audioCtx) initAudio();
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-
-            oscillator.type = 'square'; // 電子音
-            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // ラの音
-            
-            // 音量制御
-            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
-
-            oscillator.start();
-            oscillator.stop(audioCtx.currentTime + 0.2);
-
-            // バイブレーション
-            if (navigator.vibrate) navigator.vibrate(200);
-        }
-
-        // ★★★ 3. アラーム開始 ★★★
-        function startAlarm() {
-            const modal = document.getElementById('alarm-modal');
-            modal.style.display = 'flex';
-            
-            // 念のため再開
-            if (!audioCtx) initAudio();
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-
-            // 即座に1回鳴らす
-            playPattern();
-
-            if (alarmInterval) clearInterval(alarmInterval);
-            // 2.5秒ごとに繰り返す
-            alarmInterval = setInterval(playPattern, 2500);
-        }
-
-        function playPattern() {
-            playBeep();
-            setTimeout(playBeep, 300);
-            setTimeout(playBeep, 600);
-        }
-
-        // ★★★ 4. アラーム停止 ★★★
-        function stopAlarm() {
-            document.getElementById('alarm-modal').style.display = 'none';
-            if (alarmInterval) {
-                clearInterval(alarmInterval);
-                alarmInterval = null;
-            }
-        }
-
-        // --- 初期化 ---
-        document.addEventListener('DOMContentLoaded', async () => {
-            const savedId = localStorage.getItem('myOrderId');
-            if(savedId) {
-                const res = await fetch(`/api/order/${savedId}`);
-                if(res.ok) {
-                    const order = await res.json();
-                    socket.emit('register_customer', { orderId: order.id });
-                    updateScreen(order);
-                } else {
-                    localStorage.removeItem('myOrderId');
+                if (AudioContext) {
+                    audioCtx = new AudioContext();
                 }
             }
-        });
-
-        // 画面更新
-        function updateScreen(order) {
-            const mainView = document.getElementById('main-view');
-            const msgDiv = document.getElementById('message');
-            const receiptArea = document.getElementById('receipt-area');
-
-            mainView.style.display = 'none';
-            msgDiv.style.display = 'block';
-
-            if (order.status === '調理中') {
-                msgDiv.className = 'msg-cooking';
-                msgDiv.innerHTML = `注文番号: <strong>${order.id}</strong><br>只今調理中です。<br>そのままお待ちください。`;
-                receiptArea.innerHTML = '';
-            
-            } else if (order.status === '支払い待ち') {
-                msgDiv.style.display = 'none';
-                receiptArea.innerHTML = `<div style="text-align:center; padding:20px; font-weight:bold; color:red;">呼び出し中！</div>`;
-                
-                // ★ ここでアラーム発動
-                startAlarm();
-
-            } else if (order.status === '提供済み') {
-                stopAlarm();
-                msgDiv.style.display = 'none';
-                showReceipt(order);
-            }
         }
 
-        function showReceipt(order) {
-            let total = 0;
-            let list = '';
-            order.items.forEach(i => {
-                list += `<li>${i.name} x ${i.quantity}</li>`;
-                total += i.price * i.quantity;
-            });
-            document.getElementById('receipt-area').innerHTML = `
-                <div id="receipt">
-                    <h2 style="text-align:center;">領収書</h2>
-                    <p>注文番号: ${order.id}</p>
-                    <p>日付: ${new Date(order.createdAt).toLocaleString()}</p>
-                    <hr><ul>${list}</ul><hr>
-                    <h3 style="text-align:right;">合計: ${total}円</h3>
-                </div>
-                <button id="btn-new-order" onclick="resetOrder()">新しい注文をする</button>
-            `;
-        }
+        function playBeep() {
+            try {
+                if (!audioCtx) initAudio();
+                if (!audioCtx) return; // AudioContext非対応ブラウザ対策
+                if (audioCtx.state === 'suspended') audioCtx.resume();
 
-        function resetOrder() {
-            if(confirm('トップに戻りますか？')) {
-                localStorage.removeItem('myOrderId');
-                location.reload();
-            }
-        }
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
 
-        // ★★★ 注文ボタンのクリックイベント ★★★
-        document.getElementById('submit-order').addEventListener('click', async () => {
-            if(cart.length===0) return alert('カートが空です');
-            
-            // ★【重要】ここで強制的にオーディオエンジンを起こす
-            initAudio();
-            
-            // "suspended" (停止中) なら再開させる
-            if (audioCtx.state === 'suspended') {
-                await audioCtx
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                oscillator.type = 'square';
+                oscillator.frequency.
