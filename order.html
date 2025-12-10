@@ -11,15 +11,14 @@
         .price { font-weight: bold; color: #d9534f; }
         button { padding: 10px; cursor: pointer; font-size: 1.1em; }
         
-        /* ステータス表示エリア */
         #message { margin-top: 20px; padding: 15px; font-weight: bold; text-align: center; display: none; }
         .msg-cooking { background: #e2e3e5; color: #383d41; border: 2px solid #d6d8db; }
         
-        /* ★ 強力な呼び出し画面（モーダル） */
+        /* アラーム画面（赤背景） */
         #alarm-modal {
-            display: none; /* 最初は隠す */
+            display: none;
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background-color: rgba(255, 0, 0, 0.9); /* 赤背景 */
+            background-color: rgba(255, 0, 0, 0.95);
             color: white; z-index: 9999;
             flex-direction: column; justify-content: center; align-items: center;
             text-align: center;
@@ -31,15 +30,7 @@
         }
         @keyframes shake {
             0% { transform: translate(1px, 1px) rotate(0deg); }
-            10% { transform: translate(-1px, -2px) rotate(-1deg); }
-            20% { transform: translate(-3px, 0px) rotate(1deg); }
-            30% { transform: translate(3px, 2px) rotate(0deg); }
-            40% { transform: translate(1px, -1px) rotate(1deg); }
             50% { transform: translate(-1px, 2px) rotate(-1deg); }
-            60% { transform: translate(-3px, 1px) rotate(0deg); }
-            70% { transform: translate(3px, 1px) rotate(-1deg); }
-            80% { transform: translate(-1px, -1px) rotate(1deg); }
-            90% { transform: translate(1px, 2px) rotate(0deg); }
             100% { transform: translate(1px, -2px) rotate(-1deg); }
         }
 
@@ -59,8 +50,12 @@
         <h1>ご注文</h1>
         <div id="menu-area">
             <div class="menu-item">
-                <h3>牛串★乳成分を含みます★</h3><p class="price">500円</p>
-                <button class="add-to-cart" data-name="牛串" data-price="500">カートに入れる</button>
+                <h3>商品A</h3><p class="price">500円</p>
+                <button class="add-to-cart" data-name="商品A" data-price="500">カートに入れる</button>
+            </div>
+            <div class="menu-item">
+                <h3>商品B</h3><p class="price">800円</p>
+                <button class="add-to-cart" data-name="商品B" data-price="800">カートに入れる</button>
             </div>
         </div>
         <h2>カート</h2>
@@ -77,51 +72,74 @@
         const VAPID_PUBLIC_KEY = 'BAoAi-ufJ4-0DmT7deTIt7XciP2h2uaIT298QxdfBn3YCkM-11mpduc9hkyyHUEUwXqmd-F3it0__q-BDW0-kUk'; 
         
         let cart = [];
-        const customerCallSound = new Audio('/customer-call.mp3');
-        let audioUnlocked = false;
-        let alarmInterval = null; // アラーム繰り返し用
+        let alarmInterval = null;
 
-        // ★ 音声再生＆バイブレーション
-        function playSound() {
-            if (audioUnlocked) { 
-                customerCallSound.currentTime = 0; 
-                customerCallSound.play().catch(e => console.log('再生エラー:', e));
-                
-                // スマホを振動させる (対応機種のみ)
-                if (navigator.vibrate) {
-                    navigator.vibrate([500, 200, 500, 200, 500]);
-                }
+        // ★★★ ビープ音作成用 (AudioContext) ★★★
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             }
         }
 
-        // ★ 強力なアラーム開始機能
+        // ★★★ 電子音(ビープ)を鳴らす関数 ★★★
+        function playBeep() {
+            if (!audioCtx) initAudio();
+            
+            // 音の発生源を作成
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            // 音色と高さの設定
+            oscillator.type = 'square'; // 'square'は「ピッ」という電子音らしい音
+            oscillator.frequency.value = 880; // 高さ (Hz)
+
+            // 音量の設定 (フェードアウト)
+            gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+
+            // 再生開始と停止
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.3);
+
+            // バイブレーション (対応スマホのみ)
+            if (navigator.vibrate) navigator.vibrate(300);
+        }
+
+        // ★ アラーム開始 (ビープ音を連打)
         function startAlarm() {
             const modal = document.getElementById('alarm-modal');
-            modal.style.display = 'flex'; // 全画面表示
+            modal.style.display = 'flex';
             
-            // すぐに鳴らす
-            playSound();
+            if (!audioCtx) initAudio();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
 
-            // 既にアラーム中なら重複させない
+            // 最初の1回
+            playOneAlarmCycle();
+
             if (alarmInterval) clearInterval(alarmInterval);
-
-            // 3秒ごとに繰り返し鳴らす (気づくまで終わらない)
-            alarmInterval = setInterval(() => {
-                playSound();
-            }, 3000);
+            // 2秒ごとに音のセットを鳴らす
+            alarmInterval = setInterval(playOneAlarmCycle, 2000);
         }
 
-        // ★ アラーム停止機能
+        // 「ピッ！ピッ！ピッ！」というリズムを作る
+        function playOneAlarmCycle() {
+            playBeep();
+            setTimeout(playBeep, 400); // 0.4秒後にもう一回
+            setTimeout(playBeep, 800); // 0.8秒後にもう一回
+        }
+
+        // ★ アラーム停止
         function stopAlarm() {
-            const modal = document.getElementById('alarm-modal');
-            modal.style.display = 'none'; // 画面を隠す
-            
+            document.getElementById('alarm-modal').style.display = 'none';
             if (alarmInterval) {
-                clearInterval(alarmInterval); // ループ停止
+                clearInterval(alarmInterval);
                 alarmInterval = null;
             }
-            customerCallSound.pause(); // 音も止める
-            customerCallSound.currentTime = 0;
         }
 
         // 初期化
@@ -153,18 +171,12 @@
                 receiptArea.innerHTML = '';
             
             } else if (order.status === '支払い待ち') {
-                // 呼び出し中
-                msgDiv.style.display = 'none'; // メッセージではなくアラーム画面を出すため
-                receiptArea.innerHTML = `
-                    <div style="text-align:center; padding:20px; font-weight:bold; font-size:1.5em; color:red;">
-                        呼び出し中！<br>レジへお越しください。
-                    </div>`;
-                
-                // ★ ここでアラーム発動
-                startAlarm();
+                msgDiv.style.display = 'none';
+                receiptArea.innerHTML = `<div style="text-align:center; padding:20px; font-weight:bold; color:red;">呼び出し中！</div>`;
+                startAlarm(); // アラーム開始
 
             } else if (order.status === '提供済み') {
-                stopAlarm(); // 念のため止める
+                stopAlarm();
                 msgDiv.style.display = 'none';
                 showReceipt(order);
             }
@@ -177,7 +189,6 @@
                 list += `<li>${i.name} x ${i.quantity}</li>`;
                 total += i.price * i.quantity;
             });
-            
             document.getElementById('receipt-area').innerHTML = `
                 <div id="receipt">
                     <h2 style="text-align:center;">領収書</h2>
@@ -200,16 +211,17 @@
         document.getElementById('submit-order').addEventListener('click', async () => {
             if(cart.length===0) return alert('カートが空です');
             
-            // ★ ここで音声を「強制ロック解除」する (無音で一瞬再生)
-            if(!audioUnlocked) {
-                customerCallSound.muted = true; // 一旦ミュート
-                customerCallSound.play().then(()=>{ 
-                    customerCallSound.pause(); 
-                    customerCallSound.currentTime = 0;
-                    customerCallSound.muted = false; // ミュート解除
-                    audioUnlocked = true; 
-                    console.log("音声ロック解除成功");
-                }).catch(e=>console.log("ロック解除失敗", e));
+            // ★ 音声エンジンの起動（ロック解除）
+            initAudio();
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume().then(() => {
+                    // 無音を一瞬鳴らして完全にアンロック
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    gain.gain.value = 0; // 無音
+                    osc.connect(gain); gain.connect(audioCtx.destination);
+                    osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+                });
             }
 
             const res = await fetch('/api/order', {
@@ -220,64 +232,4 @@
             
             if(res.ok) {
                 localStorage.setItem('myOrderId', data.orderId);
-                socket.emit('register_customer', { orderId: data.orderId });
-                if ('serviceWorker' in navigator) registerPush(data.orderId);
-                updateScreen({ id: data.orderId, status: '調理中', items: cart });
-            }
-        });
-
-        // 呼び出しイベント (バックアップ用)
-        socket.on('order_ready', () => {
-            startAlarm(); // 即アラーム開始
-        });
-
-        socket.on('payment_confirmed', (order) => {
-            updateScreen(order);
-        });
-
-        socket.on('status_updated', (order) => {
-            const oid = localStorage.getItem('myOrderId');
-            if(oid && parseInt(oid) === order.id) {
-                updateScreen(order);
-            }
-        });
-
-        // カート機能
-        const cartList = document.getElementById('cart-list');
-        const totalDiv = document.getElementById('total');
-        document.querySelectorAll('.add-to-cart').forEach(btn => {
-            btn.addEventListener('click', e => {
-                const name = e.target.getAttribute('data-name');
-                const price = parseInt(e.target.getAttribute('data-price'));
-                const exist = cart.find(i=>i.name===name);
-                if(exist) exist.quantity++; else cart.push({name, price, quantity:1});
-                renderCart();
-            });
-        });
-        function renderCart() {
-            cartList.innerHTML = ''; let t=0;
-            cart.forEach((i, idx) => {
-                cartList.innerHTML += `<li>${i.name} - ${i.price}円 x ${i.quantity} <button onclick="modQ(${idx},1)">+</button><button onclick="modQ(${idx},-1)">-</button></li>`;
-                t += i.price * i.quantity;
-            });
-            totalDiv.innerText = `合計: ${t}円`;
-        }
-        window.modQ = (idx, d) => {
-            cart[idx].quantity += d;
-            if(cart[idx].quantity<=0) cart.splice(idx,1);
-            renderCart();
-        };
-
-        async function registerPush(orderId) {
-            try {
-                const reg = await navigator.serviceWorker.register('/service-worker.js');
-                const perm = await Notification.requestPermission();
-                if(perm!=='granted') return;
-                const sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey: VAPID_PUBLIC_KEY});
-                await fetch('/api/subscribe', {method:'POST', body:JSON.stringify({subscription:sub, orderId}), headers:{'Content-Type':'application/json'}});
-            } catch(e){}
-        }
-    </script>
-</body>
-</html>
-
+                socket.emit('register_customer', { order
